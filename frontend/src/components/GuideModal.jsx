@@ -1,6 +1,19 @@
+import { useRef } from 'react';
+
 export default function GuideModal({ onClose }) {
+  const overlayClickRef = useRef(false);
+
   return (
-    <div className="guide-overlay" onClick={onClose}>
+    <div 
+      className="guide-overlay" 
+      onMouseDown={(e) => { 
+        if (e.target === e.currentTarget) overlayClickRef.current = true; 
+      }}
+      onMouseUp={(e) => { 
+        if (e.target === e.currentTarget && overlayClickRef.current) onClose(); 
+        overlayClickRef.current = false; 
+      }}
+    >
       <div className="guide-modal" onClick={(e) => e.stopPropagation()}>
         <button className="auth-close" onClick={onClose}>&times;</button>
 

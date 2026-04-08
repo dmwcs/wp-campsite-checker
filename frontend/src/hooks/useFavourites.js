@@ -3,19 +3,27 @@ import { getAuthHeaders } from '../utils/auth';
 
 const API = 'https://7iqek35q9i.execute-api.ap-southeast-2.amazonaws.com';
 
-export function useFavourites() {
+export function useFavourites(user) {
   const [favourites, setFavourites] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadFavourites = useCallback(async () => {
+    if (!user) {
+      setFavourites([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
       const headers = await getAuthHeaders();
       const res = await fetch(`${API}/api/favourites`, { headers });
       const data = await res.json();
       setFavourites(Array.isArray(data) ? data : []);
-    } catch {}
+    } catch {
+      setFavourites([]);
+    }
     setLoading(false);
-  }, []);
+  }, [user]);
 
   useEffect(() => { loadFavourites(); }, [loadFavourites]);
 

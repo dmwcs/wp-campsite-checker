@@ -3,21 +3,29 @@ import { getAuthHeaders } from '../utils/auth';
 
 const API = 'https://7iqek35q9i.execute-api.ap-southeast-2.amazonaws.com';
 
-export function useSettings() {
+export function useSettings(user) {
   const [settings, setSettings] = useState({ email: '' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) {
+      setSettings({ email: '' });
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     (async () => {
       try {
         const headers = await getAuthHeaders();
         const res = await fetch(`${API}/api/settings`, { headers });
         const data = await res.json();
         setSettings(data);
-      } catch {}
+      } catch {
+        setSettings({ email: '' });
+      }
       setLoading(false);
     })();
-  }, []);
+  }, [user]);
 
   const updateEmail = useCallback(async (email) => {
     setSettings((prev) => ({ ...prev, email }));

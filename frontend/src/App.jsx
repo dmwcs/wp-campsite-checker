@@ -46,8 +46,8 @@ export default function App() {
   const { mode, resolved, cycle } = useTheme();
   const [prefs, updatePrefs] = usePreferences();
   const { user, checking: authChecking, signOut, refresh: refreshAuth } = useAuth();
-  const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, toggleNotify, loading: favsLoading } = useFavourites();
-  const { settings, updateEmail } = useSettings();
+  const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, toggleNotify, loading: favsLoading } = useFavourites(user);
+  const { settings, updateEmail } = useSettings(user);
   const [emailInput, setEmailInput] = useState('');
   const [emailEditing, setEmailEditing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);

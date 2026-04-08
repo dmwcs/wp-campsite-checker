@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { signIn, signUp, confirmSignUp, resetPassword, confirmResetPassword } from 'aws-amplify/auth';
+import { useState, useRef } from 'react';
+import { signIn, signUp, confirmSignUp, resendSignUpCode, resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 
 const VIEWS = {
   SIGN_IN: 'signIn',
@@ -10,6 +10,7 @@ const VIEWS = {
 };
 
 export default function AuthModal({ onClose, onSuccess }) {
+  const overlayClickRef = useRef(false);
   const [view, setView] = useState(VIEWS.SIGN_IN);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,7 +21,7 @@ export default function AuthModal({ onClose, onSuccess }) {
 
   const handleError = (e) => {
     const msg = e?.message || 'Operation failed, please try again';
-    if (msg.includes('User already exists')) setError('This email is already registered. Please sign in.');
+    if (msg.includes('User already exists')) setError('This email is already registered. Please sign in or verify your account.');
     else if (msg.includes('Incorrect username or password')) setError('Incorrect email or password');
     else if (msg.includes('User does not exist')) setError('This email is not registered');
     else if (msg.includes('Invalid verification code')) setError('Invalid verification code');
@@ -39,7 +40,17 @@ export default function AuthModal({ onClose, onSuccess }) {
         onClose();
       }
     } catch (err) {
-      handleError(err);
+      if (err?.name === 'UserNotConfirmedException') {
+        try {
+          await resendSignUpCode({ username: email });
+          setError('');
+          setView(VIEWS.CONFIRM);
+        } catch (resendErr) {
+          handleError(resendErr);
+        }
+      } else {
+        handleError(err);
+      }
     }
     setLoading(false);
   };
@@ -63,7 +74,17 @@ export default function AuthModal({ onClose, onSuccess }) {
         setView(VIEWS.CONFIRM);
       }
     } catch (err) {
-      handleError(err);
+      if (err?.message?.includes('User already exists')) {
+        try {
+          await resendSignUpCode({ username: email });
+          setError('');
+          setView(VIEWS.CONFIRM);
+        } catch (resendErr) {
+          handleError(resendErr);
+        }
+      } else {
+        handleError(err);
+      }
     }
     setLoading(false);
   };
@@ -116,7 +137,16 @@ export default function AuthModal({ onClose, onSuccess }) {
   };
 
   return (
-    <div className="auth-overlay" onClick={onClose}>
+    <div 
+      className="auth-overlay" 
+      onMouseDown={(e) => { 
+        if (e.target === e.currentTarget) overlayClickRef.current = true; 
+      }}
+      onMouseUp={(e) => { 
+        if (e.target === e.currentTarget && overlayClickRef.current) onClose(); 
+        overlayClickRef.current = false; 
+      }}
+    >
       <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
         <button className="auth-close" onClick={onClose}>&times;</button>
 
@@ -196,6 +226,17 @@ export default function AuthModal({ onClose, onSuccess }) {
             <button type="submit" className="auth-submit" disabled={loading}>
               {loading ? 'Verifying...' : 'Verify & Sign In'}
             </button>
+            <div className="auth-links">
+              <button type="button" className="auth-link" onClick={async () => {
+                setError('');
+                try {
+                  await resendSignUpCode({ username: email });
+                  setError('A new code has been sent.');
+                } catch (err) {
+                  handleError(err);
+                }
+              }}>Resend code</button>
+            </div>
           </form>
         )}
 
