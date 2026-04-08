@@ -199,34 +199,82 @@
     flex-wrap: wrap;
   }
 
+  /* ── Mobile: Monitor night rows ── */
   .mn-row-head {
     flex-wrap: wrap;
     min-height: auto;
-    gap: 6px;
+    gap: 4px 8px;
+    padding: 10px;
+  }
+
+  .mn-dot {
+    margin-top: 2px;
   }
 
   .mn-date {
-    font-size: 12px;
+    font-size: 13px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
+    text-overflow: unset;
+    flex: 1;
+  }
+
+  .mn-row-right {
+    min-width: auto;
+    width: 100%;
+    justify-content: flex-end;
+    padding-left: 14px;
+    margin-top: 2px;
   }
 
   .mn-tag {
     min-width: auto;
+    font-size: 11px;
   }
 
   .mn-action {
-    font-size: 9px;
-    padding: 2px 6px;
+    font-size: 10px;
+    padding: 3px 8px;
   }
 
+  /* Full period row */
   .mon-full-period .mn-row-head {
     flex-wrap: wrap;
   }
 
+  .mon-full-period .mn-date {
+    flex: 1;
+    font-size: 12px;
+  }
+
+  .mon-full-period .mn-row-right {
+    width: 100%;
+    justify-content: flex-end;
+    padding-left: 14px;
+  }
+
   .mon-breakdown-label {
     font-size: 9px;
+    padding: 0 12px;
+  }
+
+  .mon-progress {
+    padding: 0 12px;
+  }
+
+  .mon-nights {
+    padding: 0 6px 10px;
+    gap: 3px;
+  }
+
+  .mn-unit-row {
+    padding: 2px 10px 8px 14px;
+    gap: 4px;
+  }
+
+  .mn-unit-pill {
+    font-size: 10px;
+    padding: 3px 7px;
   }
 
   .fav-user-bar {
@@ -277,6 +325,81 @@
 
   .mon-filter-tag {
     font-size: 8px;
+  }
+
+  /* ── Mobile: OptionCard (search results) ── */
+  .option-header {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    gap: 4px 8px;
+  }
+
+  .option-info {
+    flex: 1 1 calc(100% - 20px);
+    gap: 4px 6px;
+  }
+
+  .option-title {
+    font-size: 12px;
+  }
+
+  .option-nights {
+    font-size: 10px;
+  }
+
+  .status-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    margin-left: auto;
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .operator-groups {
+    padding: 0 14px 12px;
+  }
+
+  .site-item {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .site-name {
+    font-size: 12px;
+  }
+
+  .site-price {
+    font-size: 12px;
+  }
+
+  .site-stock {
+    font-size: 10px;
+  }
+
+  .operator-name {
+    font-size: 11px;
+  }
+
+  .breakdown-label {
+    font-size: 9px;
+  }
+
+  /* ── Mobile: Options list spacing ── */
+  .options-list {
+    gap: 8px;
+  }
+
+  .option-card {
+    border-radius: var(--radius-md);
+  }
+
+  /* ── Mobile: all-available banner ── */
+  .all-available-banner {
+    font-size: 13px;
+    padding: 10px 14px;
   }
 }
 
@@ -349,35 +472,21 @@
 }
 
 .help-popover {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   z-index: 100;
   animation: popIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: calc(100vw - 32px);
 }
 
 .help-popover-inner {
   width: 240px;
+  max-width: 100%;
   padding: 14px 16px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md), 0 0 40px rgba(0, 0, 0, 0.3);
   position: relative;
-}
-
-.help-popover-inner::before {
-  content: '';
-  position: absolute;
-  top: -5px;
-  left: 50%;
-  transform: translateX(-50%) rotate(45deg);
-  width: 9px;
-  height: 9px;
-  background: var(--bg-raised);
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
 }
 
 .help-popover-inner p {
@@ -577,7 +686,7 @@ select option {
   border-radius: var(--radius-sm);
   outline: none;
   transition: border-color 0.2s;
-  color-scheme: dark;
+  color-scheme: var(--date-scheme);
 }
 
 .custom-field input[type="date"]:focus {
@@ -839,9 +948,6 @@ select option {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-bright);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .option-nights {
@@ -1847,6 +1953,8 @@ select option {
   border-radius: var(--radius-sm);
   overflow: hidden;
   transition: background 0.15s ease;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
 }
 
 .mn-row-head {
@@ -2119,6 +2227,17 @@ select option {
 
 .mn-unit-detail .mn-site-name {
   flex: 1;
+}
+
+.mn-site-status {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.mn-site-status.avail {
+  color: var(--green);
+  font-weight: 600;
 }
 
 .mn-details-footer {
