@@ -2,7 +2,7 @@ import { getUserSettings, putUserSettings } from '../utils/db.js';
 import { json } from '../utils/response.js';
 
 function getUserId(event) {
-  return event.requestContext?.authorizer?.jwt?.claims?.sub || 'default-user';
+  return event.requestContext?.authorizer?.jwt?.claims?.sub;
 }
 
 export async function get(event) {

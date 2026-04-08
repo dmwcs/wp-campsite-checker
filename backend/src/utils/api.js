@@ -1,4 +1,4 @@
-import { API_BASE, BASE_PARAMS } from 'shared';
+import { API_BASE, BASE_PARAMS } from './shared.js';
 
 export async function fetchAvailability(date, period) {
   const params = new URLSearchParams({ ...BASE_PARAMS, date, period });

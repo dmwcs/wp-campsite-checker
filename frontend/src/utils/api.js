@@ -14,7 +14,7 @@ export async function fetchAvailability(date, period) {
 
   const response = await fetch(`${API_BASE}?${params}`);
   if (!response.ok) {
-    throw new Error(`API 请求失败: ${response.status}`);
+    throw new Error(`API request failed: ${response.status}`);
   }
   return response.json();
 }
@@ -36,7 +36,7 @@ export function parseAvailability(data) {
             name: item.Name,
             itemId: item.Id,
             cost: item.Availability.Cost,
-            numAvailable: item.Availability.Days[0]?.NumAvailable || '未知',
+            numAvailable: item.Availability.Days[0]?.NumAvailable || 'unknown',
           });
         }
       }

@@ -2,3 +2,7 @@ packages:
   - frontend
   - backend
   - shared
+
+ignoredBuiltDependencies:
+  - esbuild
+  - serverless

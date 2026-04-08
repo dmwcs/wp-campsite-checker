@@ -6,14 +6,11 @@
     "deploy": "serverless deploy",
     "remove": "serverless remove"
   },
-  "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.700.0",
-    "@aws-sdk/lib-dynamodb": "^3.700.0",
-    "@aws-sdk/client-ses": "^3.700.0",
-    "shared": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "esbuild": "^0.24.0",
     "serverless": "^4.0.0",
+    "serverless-esbuild": "^1.54.0",
     "serverless-offline": "^14.0.0"
   }
 }

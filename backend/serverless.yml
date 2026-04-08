@@ -2,6 +2,13 @@ service: wp-campsite-backend
 
 frameworkVersion: '4'
 
+build:
+  esbuild:
+    bundle: true
+    minify: false
+    external:
+      - '@aws-sdk/*'
+
 provider:
   name: aws
   runtime: nodejs20.x
@@ -9,8 +16,31 @@ provider:
   stage: ${opt:stage, 'dev'}
   environment:
     DYNAMODB_TABLE: ${self:service}-${self:provider.stage}
-    SES_FROM_EMAIL: ${env:SES_FROM_EMAIL, ''}
+    SES_FROM_EMAIL: 'noreply@sheltoncui.com'
     CRON_SECRET: ${env:CRON_SECRET, ''}
+  httpApi:
+    cors:
+      allowedOrigins:
+        - https://d27uqj4rfn4tet.cloudfront.net
+        - http://localhost:5173
+        - http://localhost:5174
+        - http://localhost:5175
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+    authorizers:
+      cognitoAuthorizer:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: !GetAtt CognitoUserPool.ProviderURL
+        audience:
+          - !Ref CognitoUserPoolClient
   iam:
     role:
       statements:
@@ -39,6 +69,8 @@ functions:
       - httpApi:
           path: /api/favourites
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   createFavourite:
     handler: src/functions/favourites.create
@@ -46,6 +78,8 @@ functions:
       - httpApi:
           path: /api/favourites
           method: post
+          authorizer:
+            name: cognitoAuthorizer
 
   deleteFavourite:
     handler: src/functions/favourites.remove
@@ -53,8 +87,28 @@ functions:
       - httpApi:
           path: /api/favourites/{id}
           method: delete
+          authorizer:
+            name: cognitoAuthorizer
 
-  # 手动查询空位
+  markBooked:
+    handler: src/functions/favourites.booked
+    events:
+      - httpApi:
+          path: /api/favourites/{id}/booked
+          method: put
+          authorizer:
+            name: cognitoAuthorizer
+
+  unmarkBooked:
+    handler: src/functions/favourites.unbook
+    events:
+      - httpApi:
+          path: /api/favourites/{id}/unbook
+          method: put
+          authorizer:
+            name: cognitoAuthorizer
+
+  # 手动查询空位（公开，不需要登录）
   checkAvailability:
     handler: src/functions/check.handler
     events:
@@ -62,7 +116,7 @@ functions:
           path: /api/check
           method: post
 
-  # 定时检查 + 发邮件通知
+  # 定时检查 + 发邮件通知（EventBridge 触发，不走 API Gateway）
   cronCheck:
     handler: src/functions/cron.handler
     timeout: 60
@@ -71,13 +125,15 @@ functions:
           rate: rate(30 minutes)
           enabled: true
 
-  # 用户设置（邮箱等）
+  # 用户设置
   getSettings:
     handler: src/functions/settings.get
     events:
       - httpApi:
           path: /api/settings
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   updateSettings:
     handler: src/functions/settings.update
@@ -85,6 +141,8 @@ functions:
       - httpApi:
           path: /api/settings
           method: put
+          authorizer:
+            name: cognitoAuthorizer
 
 resources:
   Resources:
@@ -103,6 +161,38 @@ resources:
             KeyType: HASH
           - AttributeName: SK
             KeyType: RANGE
+
+    # Cognito User Pool
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:service}-users-${self:provider.stage}
+        AutoVerifiedAttributes:
+          - email
+        UsernameAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireUppercase: false
+            RequireNumbers: true
+            RequireSymbols: false
+        Schema:
+          - Name: email
+            Required: true
+            Mutable: true
+
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: ${self:service}-client-${self:provider.stage}
+        UserPoolId: !Ref CognitoUserPool
+        GenerateSecret: false
+        ExplicitAuthFlows:
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        PreventUserExistenceErrors: ENABLED
 
     # S3 桶托管前端
     FrontendBucket:
@@ -173,3 +263,9 @@ resources:
     CloudFrontUrl:
       Value: !GetAtt FrontendDistribution.DomainName
       Description: CloudFront distribution URL
+    UserPoolId:
+      Value: !Ref CognitoUserPool
+      Description: Cognito User Pool ID
+    UserPoolClientId:
+      Value: !Ref CognitoUserPoolClient
+      Description: Cognito User Pool Client ID

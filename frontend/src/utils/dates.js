@@ -1,27 +1,27 @@
-const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function formatDate(date) {
   return date.toISOString().split('T')[0];
 }
 
 export function formatDisplayDate(date) {
-  return `${date.getMonth() + 1}月${date.getDate()}日(${DAY_NAMES[date.getDay()]})`;
+  return `${date.getMonth() + 1}/${date.getDate()} (${DAY_NAMES[date.getDay()]})`;
 }
 
 export function getWeekendDates(weeksFromNow = 0) {
   const today = new Date();
   const dayOfWeek = today.getDay();
 
-  // 周五/六/日 → 回溯到本周五；周一~周四 → 前进到本周五
+  // Fri/Sat/Sun → go back to this Friday; Mon-Thu → go forward to this Friday
   let daysToFriday;
   if (dayOfWeek === 5) {
     daysToFriday = 0;
   } else if (dayOfWeek === 6) {
-    daysToFriday = -1; // 周六 → 回退1天到周五
+    daysToFriday = -1; // Saturday → go back 1 day to Friday
   } else if (dayOfWeek === 0) {
-    daysToFriday = -2; // 周日 → 回退2天到周五
+    daysToFriday = -2; // Sunday → go back 2 days to Friday
   } else {
-    daysToFriday = 5 - dayOfWeek; // 周一~周四 → 前进到周五
+    daysToFriday = 5 - dayOfWeek; // Mon-Thu → advance to Friday
   }
   daysToFriday += weeksFromNow * 7;
 

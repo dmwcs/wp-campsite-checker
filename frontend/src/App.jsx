@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePreferences } from './hooks/usePreferences';
 import { useFavourites } from './hooks/useFavourites';
+import { useSettings } from './hooks/useSettings';
+import { useAuth } from './hooks/useAuth';
+import AuthModal from './components/AuthModal';
 import { VIC_HOLIDAYS_2026 } from './data/holidays';
 import { fetchAvailability, parseAvailability } from './utils/api';
 import { formatDate, formatDisplayDate, getWeekendDates, addDays, isHolidayPast } from './utils/dates';
@@ -9,19 +12,19 @@ import './App.css';
 const BOOKING_URL = 'https://bookings.parks.vic.gov.au/book#';
 
 const TABS = [
-  { id: 'weekend', label: '周末', icon: '◐', help: '快速查询最近8周的周末营地空位。选择后自动查询，显示完整周末（2晚）和每晚的空位情况。' },
-  { id: 'holiday', label: '节假日', icon: '⟡', help: '快速查询维州公共假期的营地空位。点选假期自动查询，显示整段假期和每晚的空位情况。' },
-  { id: 'custom', label: '自定义', icon: '◈', help: '自己挑入住和离开日期，最长 14 晚。选好日期后点「开始查询」。' },
-  { id: 'favourites', label: '收藏', icon: '☆', help: '保存关注的日期段，打开页面自动查询所有收藏的空位情况。' },
+  { id: 'weekend', label: 'Weekend', icon: '◐', help: 'Quickly check campsite availability for the next 8 weekends. Auto-queries on selection, showing full weekend (2 nights) and per-night availability.' },
+  { id: 'holiday', label: 'Holidays', icon: '⟡', help: 'Quickly check campsite availability for VIC public holidays. Auto-queries on selection, showing full holiday and per-night availability.' },
+  { id: 'custom', label: 'Custom', icon: '◈', help: 'Pick your own check-in and check-out dates, up to 14 nights. Select dates then click "Search".' },
+  { id: 'favourites', label: 'Favourites', icon: '☆', help: 'Save date ranges you care about. Opens the page and auto-checks availability for all your favourites.' },
 ];
 
-const WEEKEND_LABELS = ['这周末', '下周末', '下下周末', '往后第4周', '往后第5周', '往后第6周', '往后第7周', '往后第8周'];
+const WEEKEND_LABELS = ['This weekend', 'Next weekend', 'In 2 weeks', 'In 3 weeks', 'In 4 weeks', 'In 5 weeks', 'In 6 weeks', 'In 7 weeks'];
 
 function getWeekendOptions() {
   return WEEKEND_LABELS.map((label, i) => {
     const { friday, sunday } = getWeekendDates(i);
     const dateStr = `${friday.getMonth() + 1}/${friday.getDate()} - ${sunday.getMonth() + 1}/${sunday.getDate()}`;
-    return { value: i, label: `${label}（${dateStr}）` };
+    return { value: i, label: `${label} (${dateStr})` };
   });
 }
 
@@ -34,13 +37,17 @@ function calcNights(checkIn, checkOut) {
 
 export default function App() {
   const [prefs, updatePrefs] = usePreferences();
-  const { favourites, addFavourite, removeFavourite } = useFavourites();
+  const { user, checking: authChecking, signOut, refresh: refreshAuth } = useAuth();
+  const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, loading: favsLoading } = useFavourites();
+  const { settings, updateEmail } = useSettings();
+  const [emailInput, setEmailInput] = useState('');
+  const [emailEditing, setEmailEditing] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [helpTab, setHelpTab] = useState(null);
   const [showAddFav, setShowAddFav] = useState(false);
-  const [favResults, setFavResults] = useState({});  // { [id]: { loading, results, error } }
   const [favDate, setFavDate] = useState(formatDate(addDays(new Date(), 1)));
   const [favCheckout, setFavCheckout] = useState(formatDate(addDays(new Date(), 3)));
   const [favName, setFavName] = useState('');
@@ -71,32 +78,14 @@ export default function App() {
     }
   }, []);
 
-  // Query all favourites
-  const queryAllFavourites = useCallback(async (favList) => {
-    if (!favList || favList.length === 0) return;
-    const newResults = {};
-    for (const fav of favList) {
-      newResults[fav.id] = { loading: true, results: null, error: null };
-    }
-    setFavResults({ ...newResults });
-
-    await Promise.all(favList.map(async (fav) => {
-      try {
-        const nights = calcNights(fav.checkIn, fav.checkOut);
-        const data = await queryCustom(fav.checkIn, nights);
-        setFavResults((prev) => ({ ...prev, [fav.id]: { loading: false, results: data, error: null } }));
-      } catch (e) {
-        setFavResults((prev) => ({ ...prev, [fav.id]: { loading: false, results: null, error: e.message } }));
-      }
-    }));
-  }, []);
+  // Sync email input when settings load
+  useEffect(() => {
+    if (settings.email) setEmailInput(settings.email);
+  }, [settings.email]);
 
   // Auto-query on mount
   useEffect(() => {
-    if (prefs.tab === 'favourites') {
-      queryAllFavourites(favourites);
-      return;
-    }
+    if (prefs.tab === 'favourites') return; // favourites load from API automatically
     if (prefs.tab === 'holiday' && prefs.holidayIndex < 0) return;
     query(prefs.tab, prefs);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -109,30 +98,21 @@ export default function App() {
       query(tab, { ...prefs, tab });
     } else if (tab === 'holiday' && prefs.holidayIndex >= 0) {
       query(tab, { ...prefs, tab });
-    } else if (tab === 'favourites') {
-      queryAllFavourites(favourites);
     }
   };
 
-  const handleAddFav = () => {
+  const handleAddFav = async () => {
     const nights = calcNights(favDate, favCheckout);
     if (nights <= 0) return;
     const newFav = { name: favName || `${favDate} → ${favCheckout}`, checkIn: favDate, checkOut: favCheckout };
-    addFavourite(newFav);
+    await addFavourite(newFav);
     setShowAddFav(false);
     setFavName('');
-    // Query the newly added fav
-    const id = Date.now(); // approximate the id that was just assigned
-    setTimeout(() => queryAllFavourites([...favourites, { ...newFav, id }]), 50);
   };
 
-  const handleRemoveFav = (id) => {
+  const handleRemoveFav = (id, name) => {
+    if (!confirm(`Remove monitor "${name}"?`)) return;
     removeFavourite(id);
-    setFavResults((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
   };
 
   const handleWeekendChange = (offset) => {
@@ -158,9 +138,9 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-badge">Wilsons Promontory</div>
-        <h1 className="header-title">营地空位查询</h1>
+        <h1 className="header-title">Campsite Availability Checker</h1>
         <p className="header-subtitle">
-          仅显示开车可达的营地 · 数据来自 Parks Victoria
+          Showing drive-in campsites only · Data from Parks Victoria
         </p>
       </header>
 
@@ -195,7 +175,7 @@ export default function App() {
       <div className="tab-content">
         {prefs.tab === 'weekend' && (
           <div className="selector-row">
-            <label className="selector-label">选择周末</label>
+            <label className="selector-label">Select weekend</label>
             <div className="select-wrap">
               <select
                 value={prefs.weekendOffset}
@@ -211,7 +191,7 @@ export default function App() {
 
         {prefs.tab === 'holiday' && (
           <div className="holiday-section">
-            <div className="holiday-label">维州公共假期 · 2026</div>
+            <div className="holiday-label">VIC Public Holidays · 2026</div>
             <div className="holiday-grid">
               {VIC_HOLIDAYS_2026.map((h, i) => {
                 const past = isHolidayPast(h);
@@ -222,7 +202,7 @@ export default function App() {
                     onClick={() => handleHolidaySelect(i)}
                   >
                     <span className="holiday-name">{h.name}</span>
-                    <span className="holiday-meta">{h.desc} · {h.nights}晚</span>
+                    <span className="holiday-meta">{h.desc} · {h.nights} nights</span>
                   </button>
                 );
               })}
@@ -235,14 +215,14 @@ export default function App() {
           return (
             <div className="custom-row">
               <div className="custom-field">
-                <label>入住日期</label>
+                <label>Check-in</label>
                 <input
                   type="date"
                   value={prefs.customDate}
                   onChange={(e) => {
                     const newDate = e.target.value;
                     const updates = { customDate: newDate };
-                    // 如果离开日期早于入住日期，自动调整为入住+1天
+                    // Auto-adjust check-out if it's before the new check-in
                     if (prefs.customCheckout <= newDate) {
                       updates.customCheckout = formatDate(addDays(new Date(newDate + 'T00:00:00'), 1));
                     }
@@ -251,7 +231,7 @@ export default function App() {
                 />
               </div>
               <div className="custom-field">
-                <label>离开日期</label>
+                <label>Check-out</label>
                 <input
                   type="date"
                   value={prefs.customCheckout}
@@ -261,31 +241,88 @@ export default function App() {
                 />
               </div>
               {nights > 0 && (
-                <div className={`nights-badge ${nights > 14 ? 'over' : ''}`}>{nights > 14 ? '超出14晚' : `${nights}晚`}</div>
+                <div className={`nights-badge ${nights > 14 ? 'over' : ''}`}>{nights > 14 ? 'Exceeds 14 nights' : `${nights} nights`}</div>
               )}
               <button className="query-btn" onClick={handleCustomQuery} disabled={loading || nights <= 0 || nights > 14}>
-                {loading ? '查询中...' : '开始查询'}
+                {loading ? 'Searching...' : 'Search'}
               </button>
             </div>
           );
         })()}
 
-        {prefs.tab === 'favourites' && (
+        {prefs.tab === 'favourites' && !user && !authChecking && (
+          <div className="fav-gate">
+            <div className="fav-gate-icon">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                <path d="M24 4l5.5 11.2L42 17.3l-9 8.8 2.1 12.4L24 32.8l-11.1 5.7L15 26.1l-9-8.8 12.5-2.1z" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.4"/>
+                <path d="M24 14l3 6.1 6.8 1.1-4.9 4.8 1.2 6.8L24 29.5l-6.1 3.3 1.2-6.8-4.9-4.8L21 20.1z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" opacity="0.15"/>
+              </svg>
+            </div>
+            <h3 className="fav-gate-title">Favourites & Notifications</h3>
+            <p className="fav-gate-desc">
+              Sign in to save date ranges you care about. The system checks availability every 30 minutes and emails you as soon as a spot opens up.
+            </p>
+            <button className="fav-gate-btn" onClick={() => setShowAuthModal(true)}>
+              Sign In / Sign Up
+            </button>
+          </div>
+        )}
+
+        {prefs.tab === 'favourites' && user && (
           <div className="fav-section">
+            <div className="fav-user-bar">
+              <span className="fav-user-email">{user?.signInDetails?.loginId || user?.username}</span>
+              <button className="sign-out-btn" onClick={signOut}>Sign Out</button>
+            </div>
+
+            {/* Email notification settings */}
+            <div className="fav-email-row">
+              <div className="custom-field" style={{flex: 1}}>
+                <label>Notification Email</label>
+                <input
+                  type="email"
+                  placeholder="Get notified when a spot opens up"
+                  value={emailEditing ? emailInput : (settings.email || '')}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  disabled={!emailEditing}
+                />
+              </div>
+              {!emailEditing ? (
+                <button
+                  className="fav-edit-btn"
+                  style={{alignSelf: 'flex-end'}}
+                  onClick={() => { setEmailInput(settings.email || ''); setEmailEditing(true); }}
+                >
+                  Edit
+                </button>
+              ) : (
+                <button
+                  className="query-btn"
+                  style={{alignSelf: 'flex-end'}}
+                  onClick={() => { updateEmail(emailInput); setEmailEditing(false); }}
+                  disabled={!emailInput}
+                >
+                  Save
+                </button>
+              )}
+            </div>
+
+            {favsLoading && <div className="loading"><span>Loading favourites...</span></div>}
+
             {/* Add button / form */}
             {!showAddFav ? (
-              <button className="fav-add-btn" onClick={() => setShowAddFav(true)}>
+              <button className="fav-add-btn" onClick={() => setShowAddFav(true)} disabled={favourites.length >= 5}>
                 <span className="fav-add-icon">+</span>
-                添加监测
+                {favourites.length >= 5 ? `Limit reached (${favourites.length}/5)` : `Add Monitor (${favourites.length}/5)`}
               </button>
             ) : (
               <div className="fav-form">
                 <div className="fav-form-row">
                   <div className="custom-field">
-                    <label>备注名称</label>
+                    <label>Label</label>
                     <input
                       type="text"
-                      placeholder="如：赛马节"
+                      placeholder="e.g. Melbourne Cup"
                       value={favName}
                       onChange={(e) => setFavName(e.target.value)}
                     />
@@ -293,7 +330,7 @@ export default function App() {
                 </div>
                 <div className="fav-form-row">
                   <div className="custom-field">
-                    <label>入住日期</label>
+                    <label>Check-in</label>
                     <input
                       type="date"
                       value={favDate}
@@ -306,7 +343,7 @@ export default function App() {
                     />
                   </div>
                   <div className="custom-field">
-                    <label>离开日期</label>
+                    <label>Check-out</label>
                     <input
                       type="date"
                       value={favCheckout}
@@ -318,10 +355,10 @@ export default function App() {
                 </div>
                 <div className="fav-form-actions">
                   <button className="query-btn" onClick={handleAddFav} disabled={calcNights(favDate, favCheckout) <= 0}>
-                    添加
+                    Add
                   </button>
                   <button className="fav-cancel-btn" onClick={() => { setShowAddFav(false); setFavName(''); }}>
-                    取消
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -329,15 +366,17 @@ export default function App() {
 
             {/* Favourite list */}
             {favourites.length === 0 && !showAddFav && (
-              <div className="fav-empty">还没有收藏，点击上方「添加监测」开始</div>
+              <div className="fav-empty">No favourites yet. Click "Add Monitor" above to get started.</div>
             )}
 
             <div className="fav-list">
               {favourites.map((fav) => {
-                const nights = calcNights(fav.checkIn, fav.checkOut);
                 const startDate = new Date(fav.checkIn + 'T00:00:00');
                 const endDate = new Date(fav.checkOut + 'T00:00:00');
-                const fr = favResults[fav.id];
+                const totalNights = fav.nights?.length || 0;
+                const bookedCount = fav.nights?.filter(n => n.status === 'booked').length || 0;
+                const availCount = fav.nights?.filter(n => n.status === 'available').length || 0;
+                const monitorCount = totalNights - bookedCount;
 
                 return (
                   <div key={fav.id} className="fav-item">
@@ -345,41 +384,66 @@ export default function App() {
                       <div className="fav-item-info">
                         <span className="fav-item-name">{fav.name}</span>
                         <span className="fav-item-dates">
-                          {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {nights}晚
+                          {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {totalNights} nights
                         </span>
                       </div>
                       <div className="fav-item-actions">
-                        {fr?.loading && (
-                          <span className="fav-item-status loading-text">查询中...</span>
+                        {bookedCount > 0 && (
+                          <span className="fav-badge booked">{bookedCount} Booked</span>
                         )}
-                        {fr?.error && (
-                          <span className="fav-item-status error-text">查询失败</span>
+                        {availCount > 0 && (
+                          <span className="fav-badge available">{availCount} Available</span>
                         )}
-                        {fr?.results && !fr.loading && (
-                          <span className={`status-badge ${fr.results.options[0]?.items?.length > 0 ? 'green' : 'red'}`}>
-                            {fr.results.options[0]?.items?.length > 0
-                              ? `${fr.results.options[0].items.reduce((s, i) => s + (typeof i.numAvailable === 'number' ? i.numAvailable : 0), 0)}个空位`
-                              : '已满'}
-                          </span>
+                        {monitorCount > 0 && bookedCount < totalNights && (
+                          <span className="fav-badge monitoring">{monitorCount - availCount} Monitoring</span>
                         )}
-                        <button className="fav-remove-btn" onClick={() => handleRemoveFav(fav.id)} title="删除">×</button>
+                        <button className="fav-remove-btn" onClick={() => handleRemoveFav(fav.id, fav.name)} title="Remove">×</button>
                       </div>
                     </div>
-                    {fr?.results && !fr.loading && (
-                      <div className="fav-item-results">
-                        <div className="options-list">
-                          {fr.results.options.map((opt, j) => (
-                            <OptionCard key={j} option={opt} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
+
+                    {/* Per-night cards */}
+                    <div className="fav-nights">
+                      {(fav.nights || []).map((night) => {
+                        const d = new Date(night.date + 'T00:00:00');
+                        const nd = new Date(night.nextDate + 'T00:00:00');
+                        return (
+                          <div key={night.date} className={`fav-night ${night.status}`}>
+                            <div className="fav-night-date">
+                              {formatDisplayDate(d)} → {formatDisplayDate(nd)}
+                            </div>
+                            <div className="fav-night-right">
+                              {night.status === 'monitoring' && (
+                                <>
+                                  <span className="fav-night-status monitoring">⏳ Monitoring</span>
+                                  <button className="fav-night-mark" onClick={() => markBooked(fav.id, night.date)}>Mark Booked</button>
+                                </>
+                              )}
+                              {night.status === 'available' && (
+                                <>
+                                  <span className="fav-night-status available">🔔 Available</span>
+                                  <a className="fav-night-book" href="https://bookings.parks.vic.gov.au/book#" target="_blank" rel="noopener noreferrer">Book Now</a>
+                                  <button className="fav-night-mark" onClick={() => markBooked(fav.id, night.date)}>Mark Booked</button>
+                                </>
+                              )}
+                              {night.status === 'booked' && (
+                                <>
+                                  <span className="fav-night-status booked">✅ Booked</span>
+                                  <button className="fav-night-mark" onClick={() => unmarkBooked(fav.id, night.date)}>Unmark</button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+
+        {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onSuccess={refreshAuth} />}
       </div>
 
       {/* Results (non-favourites) */}
@@ -389,7 +453,7 @@ export default function App() {
             <div className="loading-dots">
               <span /><span /><span />
             </div>
-            <span>正在查询营地空位...</span>
+            <span>Checking campsite availability...</span>
           </div>
         )}
 
@@ -397,7 +461,7 @@ export default function App() {
           <div className="error-card">
             <span className="error-icon">!</span>
             <div>
-              <strong>查询失败</strong>
+              <strong>Query failed</strong>
               <p>{error}</p>
             </div>
           </div>
@@ -425,9 +489,9 @@ async function queryWeekend(offset) {
   ]);
 
   const options = [
-    { title: `完整周末 ${formatDisplayDate(friday)} → ${formatDisplayDate(sunday)}`, nights: '2晚', items: parseAvailability(friToSun), highlight: true },
-    { title: `${formatDisplayDate(friday)} → ${formatDisplayDate(saturday)}`, nights: '1晚', items: parseAvailability(friToSat) },
-    { title: `${formatDisplayDate(saturday)} → ${formatDisplayDate(sunday)}`, nights: '1晚', items: parseAvailability(satToSun) },
+    { title: `Full Weekend ${formatDisplayDate(friday)} → ${formatDisplayDate(sunday)}`, nights: '2 nights', items: parseAvailability(friToSun), highlight: true },
+    { title: `${formatDisplayDate(friday)} → ${formatDisplayDate(saturday)}`, nights: '1 night', items: parseAvailability(friToSat) },
+    { title: `${formatDisplayDate(saturday)} → ${formatDisplayDate(sunday)}`, nights: '1 night', items: parseAvailability(satToSun) },
   ];
 
   return { type: 'weekend', options };
@@ -446,8 +510,8 @@ async function queryHoliday(holiday) {
 
   const options = [
     {
-      title: `完整假期 ${formatDisplayDate(start)} → ${formatDisplayDate(end)}`,
-      nights: `${holiday.nights}晚`,
+      title: `Full Holiday ${formatDisplayDate(start)} → ${formatDisplayDate(end)}`,
+      nights: `${holiday.nights} nights`,
       items: parseAvailability(fullData),
       highlight: true,
     },
@@ -456,7 +520,7 @@ async function queryHoliday(holiday) {
       const next = addDays(start, i + 1);
       return {
         title: `${formatDisplayDate(d)} → ${formatDisplayDate(next)}`,
-        nights: '1晚',
+        nights: '1 night',
         items: parseAvailability(data),
       };
     }),
@@ -480,7 +544,7 @@ async function queryCustom(dateStr, nights) {
   const options = [
     {
       title: `${formatDisplayDate(start)} → ${formatDisplayDate(end)}`,
-      nights: `${nights}晚`,
+      nights: `${nights} nights`,
       items: parseAvailability(fullData),
       highlight: true,
     },
@@ -489,7 +553,7 @@ async function queryCustom(dateStr, nights) {
       const next = addDays(start, i + 1);
       return {
         title: `${formatDisplayDate(d)} → ${formatDisplayDate(next)}`,
-        nights: '1晚',
+        nights: '1 night',
         items: parseAvailability(data),
       };
     }),
@@ -507,12 +571,12 @@ function ResultsView({ results }) {
     <>
       {allAvailable && (
         <div className="all-available-banner">
-          三种方案都有空位
+          All options have availability
         </div>
       )}
 
       {options.length > 1 && options[0].highlight && (
-        <div className="breakdown-label">逐晚明细</div>
+        <div className="breakdown-label">Nightly Breakdown</div>
       )}
 
       <div className="options-list">
@@ -550,7 +614,7 @@ function OptionCard({ option }) {
           <span className="option-nights">{nights}</span>
         </div>
         <span className={`status-badge ${available ? 'green' : 'red'}`}>
-          {available ? `${totalSites > 0 ? totalSites + '个空位' : '有空位'}` : '已满'}
+          {available ? `${totalSites > 0 ? totalSites + ' Available' : 'Available'}` : 'Full'}
         </span>
         {available && (
           <svg className={`expand-arrow ${expanded ? 'open' : ''}`} width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -561,7 +625,7 @@ function OptionCard({ option }) {
         <div className="operator-groups">
           {Object.entries(grouped).map(([operatorName, operatorItems]) => (
             <div key={operatorName} className="operator-group">
-              <div className="operator-name">{operatorName || '未知营地'}</div>
+              <div className="operator-name">{operatorName || 'Unknown campground'}</div>
               <div className="site-list">
                 {operatorItems.map((item, j) => (
                   <a
@@ -575,7 +639,7 @@ function OptionCard({ option }) {
                     <span className="site-meta">
                       <span className="site-price">${item.cost}</span>
                       <span className="site-stock">
-                        {item.numAvailable === '未知' ? '有房' : `剩 ${item.numAvailable}`}
+                        {item.numAvailable === 'unknown' ? 'Available' : `${item.numAvailable} left`}
                       </span>
                     </span>
                   </a>

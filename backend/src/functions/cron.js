@@ -1,67 +1,100 @@
-import { getAllActiveFavourites, updateFavouriteStatus, getUserSettings } from '../utils/db.js';
+import { getAllActiveFavourites, updateNightStatus, getUserSettings } from '../utils/db.js';
 import { fetchAvailability, parseAvailability } from '../utils/api.js';
-import { sendNotification } from '../utils/email.js';
-import { calcNights } from 'shared';
 
 export async function handler() {
   console.log('Cron: checking all active favourites...');
 
   const allFavs = await getAllActiveFavourites();
-  const today = new Date().toISOString().split('T')[0];
+  console.log(`Cron: ${allFavs.length} favourites with monitoring nights`);
 
-  // Filter out expired favourites
-  const activeFavs = allFavs.filter(f => f.checkIn > today);
-  console.log(`Cron: ${activeFavs.length} active favourites to check`);
+  if (allFavs.length === 0) return { statusCode: 200, body: 'No active favourites' };
 
-  if (activeFavs.length === 0) return { statusCode: 200, body: 'No active favourites' };
-
-  // Deduplicate API calls: group by checkIn+checkOut
-  const dateGroups = {};
-  for (const fav of activeFavs) {
-    const key = `${fav.checkIn}|${fav.checkOut}`;
-    if (!dateGroups[key]) dateGroups[key] = { checkIn: fav.checkIn, checkOut: fav.checkOut, favs: [] };
-    dateGroups[key].favs.push(fav);
+  // Collect all unique dates that need checking
+  const datesToCheck = new Set();
+  for (const fav of allFavs) {
+    for (const night of fav.nights) {
+      datesToCheck.add(night.date);
+    }
   }
 
-  // Query each unique date range once
-  for (const group of Object.values(dateGroups)) {
-    const nights = calcNights(group.checkIn, group.checkOut);
-    if (nights <= 0) continue;
-
-    let available;
+  // Query each unique date once (1 night each)
+  const dateResults = {};
+  await Promise.all([...datesToCheck].map(async (date) => {
     try {
-      const data = await fetchAvailability(group.checkIn, nights);
-      available = parseAvailability(data);
+      const data = await fetchAvailability(date, 1);
+      dateResults[date] = parseAvailability(data);
     } catch (e) {
-      console.error(`Cron: API error for ${group.checkIn}-${group.checkOut}:`, e.message);
-      continue;
+      console.error(`Cron: API error for ${date}:`, e.message);
+      dateResults[date] = null;
     }
+  }));
 
-    const hasAvailability = available.length > 0;
+  // Check each favourite's monitoring nights
+  for (const fav of allFavs) {
+    const newlyAvailable = [];
 
-    // Check each favourite in this group
-    for (const fav of group.favs) {
-      const wasAvailable = fav.lastStatus === 'available';
-      const nowAvailable = hasAvailability;
+    for (const night of fav.nights) {
+      const available = dateResults[night.date];
+      if (available === null) continue; // API error, skip
 
-      // Status changed from unavailable → available: send notification
-      if (nowAvailable && !wasAvailable) {
-        console.log(`Cron: availability found for ${fav.name} (user: ${fav.userId})`);
-        try {
-          const settings = await getUserSettings(fav.userId);
-          if (settings?.email) {
-            await sendNotification(settings.email, fav.name, fav.checkIn, fav.checkOut, available);
-            console.log(`Cron: email sent to ${settings.email}`);
-          }
-        } catch (e) {
-          console.error(`Cron: email error for ${fav.userId}:`, e.message);
-        }
-      }
+      const hasAvailability = available.length > 0;
+      const wasAvailable = night.status === 'available';
+      const newStatus = hasAvailability ? 'available' : 'monitoring';
 
       // Update status
-      await updateFavouriteStatus(fav.userId, fav.favId, nowAvailable ? 'available' : 'unavailable');
+      if (newStatus !== night.status) {
+        await updateNightStatus(fav.userId, fav.favId, night.date, newStatus);
+      }
+
+      // Newly available → add to notification list
+      if (hasAvailability && !wasAvailable) {
+        newlyAvailable.push({ date: night.date, nextDate: night.nextDate, sites: available });
+      }
+    }
+
+    // Send notification if any nights became available
+    if (newlyAvailable.length > 0) {
+      try {
+        const settings = await getUserSettings(fav.userId);
+        if (settings?.email) {
+          await sendNightNotification(settings.email, fav.name, newlyAvailable);
+          console.log(`Cron: email sent to ${settings.email} for ${fav.name}`);
+        }
+      } catch (e) {
+        console.error(`Cron: email error for ${fav.userId}:`, e.message);
+      }
     }
   }
 
   return { statusCode: 200, body: 'Done' };
+}
+
+async function sendNightNotification(toEmail, favName, nights) {
+  const { SESClient, SendEmailCommand } = await import('@aws-sdk/client-ses');
+  const ses = new SESClient({});
+
+  const nightDetails = nights.map(n => {
+    const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/晚, 剩${s.numAvailable}个`).join('\n');
+    return `  ${n.date} → ${n.nextDate}\n${siteList}`;
+  }).join('\n\n');
+
+  const subject = `🏕️ ${favName} 有空位了！`;
+  const body = `你关注的「${favName}」有新空位：
+
+${nightDetails}
+
+立即预订：https://bookings.parks.vic.gov.au/book#
+
+---
+此邮件由 WP Campsite Checker 自动发送
+`;
+
+  await ses.send(new SendEmailCommand({
+    Source: process.env.SES_FROM_EMAIL,
+    Destination: { ToAddresses: [toEmail] },
+    Message: {
+      Subject: { Data: subject, Charset: 'UTF-8' },
+      Body: { Text: { Data: body, Charset: 'UTF-8' } },
+    },
+  }));
 }

@@ -1,9 +1,8 @@
-import { getFavourites, putFavourite, deleteFavourite } from '../utils/db.js';
+import { getFavourites, putFavourite, deleteFavourite, markNightBooked, updateNightStatus } from '../utils/db.js';
 import { json } from '../utils/response.js';
 
-// TODO: replace with Cognito user ID from JWT
 function getUserId(event) {
-  return event.requestContext?.authorizer?.jwt?.claims?.sub || 'default-user';
+  return event.requestContext?.authorizer?.jwt?.claims?.sub;
 }
 
 export async function list(event) {
@@ -29,6 +28,32 @@ export async function create(event) {
       checkOut: body.checkOut,
     });
     return json(201, { id });
+  } catch (e) {
+    return json(500, { error: e.message });
+  }
+}
+
+export async function booked(event) {
+  try {
+    const userId = getUserId(event);
+    const favId = event.pathParameters?.id;
+    const body = JSON.parse(event.body || '{}');
+    if (!favId || !body.date) return json(400, { error: 'id and date are required' });
+    await markNightBooked(userId, favId, body.date);
+    return json(200, { marked: true });
+  } catch (e) {
+    return json(500, { error: e.message });
+  }
+}
+
+export async function unbook(event) {
+  try {
+    const userId = getUserId(event);
+    const favId = event.pathParameters?.id;
+    const body = JSON.parse(event.body || '{}');
+    if (!favId || !body.date) return json(400, { error: 'id and date are required' });
+    await updateNightStatus(userId, favId, body.date, 'monitoring');
+    return json(200, { unmarked: true });
   } catch (e) {
     return json(500, { error: e.message });
   }

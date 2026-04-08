@@ -1,6 +1,6 @@
 import { fetchAvailability, parseAvailability } from '../utils/api.js';
 import { json } from '../utils/response.js';
-import { calcNights, formatDate, addDays } from 'shared';
+import { calcNights, formatDate, addDays } from '../utils/shared.js';
 
 export async function handler(event) {
   try {
