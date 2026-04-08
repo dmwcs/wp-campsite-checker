@@ -1,16 +1,69 @@
-# React + Vite
+# WP Campsite Checker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Wilsons Promontory campsite availability checker with email notifications.
 
-Currently, two official plugins are available:
+**Live:** https://campsite.sheltoncui.com
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **Weekend** — Quick check for the next 8 weekends (full weekend + nightly breakdown)
+- **Holidays** — One-click query for VIC public holidays (2026)
+- **Custom** — Pick any check-in/check-out dates (up to 14 nights)
+- **Favourites** — Save date ranges to monitor, with per-night tracking
+  - Campsite filter: monitor specific sites (e.g. 23rd Ave #298, #299)
+  - Email notifications when availability changes (every 15 min check)
+  - Mark booked / unmark per night
+  - Subscribe/unsubscribe toggle per monitor
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Architecture
 
-## Expanding the ESLint configuration
+Fully serverless on AWS:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+Frontend (Vite + React)  →  S3 + CloudFront
+Backend (Serverless Framework)  →  Lambda + API Gateway + DynamoDB
+Auth  →  Cognito
+Email  →  SES (noreply@sheltoncui.com)
+Cron  →  EventBridge (every 15 min)
+Domain  →  campsite.sheltoncui.com (ACM + CloudFront)
+```
+
+## Project Structure
+
+```
+├── frontend/          Vite + React app
+├── backend/           Serverless Framework (Lambda functions)
+│   ├── serverless.yml
+│   └── src/
+│       ├── functions/   favourites, check, cron, settings
+│       └── utils/       db, api, email, shared
+├── shared/            Common constants, dates, holidays
+└── pnpm-workspace.yaml
+```
+
+## APIs Used
+
+- `bookeasy.com.au/be/getAccomRatesGrid` — Avenue-level availability
+- `bookeasy.com.au/api/getAccomUnitRates` — Site-level availability (specific campsites)
+- `bookeasy.com.au/api/getAccomUnits` — Campsite metadata (names, IDs, coordinates)
+
+## Deploy
+
+```bash
+# Backend
+cd backend && sls deploy
+
+# Frontend
+pnpm --filter frontend build
+aws s3 sync frontend/dist/ s3://wp-campsite-backend-frontend-dev --delete
+aws cloudfront create-invalidation --distribution-id E2GF7OASNMO6HC --paths "/*"
+```
+
+## Local Dev
+
+```bash
+pnpm install
+pnpm dev          # frontend on localhost:5173
+```
+
+Made by Shelton
