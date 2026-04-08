@@ -5,6 +5,7 @@ import { useSettings } from './hooks/useSettings';
 import { useAuth } from './hooks/useAuth';
 import AuthModal from './components/AuthModal';
 import CampsiteFilter from './components/CampsiteFilter';
+import DateRangePicker from './components/DateRangePicker';
 import GuideModal from './components/GuideModal';
 import { useTheme } from './hooks/useTheme';
 import { VIC_HOLIDAYS_2026 } from './data/holidays';
@@ -18,7 +19,7 @@ const TABS = [
   { id: 'weekend', label: 'Weekend', icon: '◐', help: 'Quickly check campsite availability for the next 8 weekends. Auto-queries on selection, showing full weekend (2 nights) and per-night availability.' },
   { id: 'holiday', label: 'Holidays', icon: '⟡', help: 'Quickly check campsite availability for VIC public holidays. Auto-queries on selection, showing full holiday and per-night availability.' },
   { id: 'custom', label: 'Custom', icon: '◈', help: 'Pick your own check-in and check-out dates, up to 14 nights. Select dates then click "Search".' },
-  { id: 'favourites', label: 'Favourites', icon: '☆', help: 'Save date ranges you care about. Opens the page and auto-checks availability for all your favourites.' },
+  { id: 'favourites', label: 'Favourites', icon: '☆', help: 'Save date ranges to monitor. Get email alerts when spots open up. Optionally filter by specific campsites. See the guide (bottom-right) for details.' },
 ];
 
 const WEEKEND_LABELS = ['This weekend', 'Next weekend', 'In 2 weeks', 'In 3 weeks', 'In 4 weeks', 'In 5 weeks', 'In 6 weeks', 'In 7 weeks'];
@@ -52,6 +53,7 @@ export default function App() {
   const [emailEditing, setEmailEditing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [helpTab, setHelpTab] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tabResults, setTabResults] = useState({}); // { weekend: {...}, holiday: {...}, custom: {...} }
   const [tabErrors, setTabErrors] = useState({});
@@ -297,14 +299,27 @@ export default function App() {
       {/* Tab Bar */}
       <nav className="tab-bar">
         {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab-item ${prefs.tab === tab.id ? 'active' : ''}`}
-            onClick={() => handleTabChange(tab.id)}
-          >
-            <span className="tab-icon">{tab.icon}</span>
-            {tab.label}
-          </button>
+          <div key={tab.id} className="tab-item-wrap">
+            <button
+              className={`tab-item ${prefs.tab === tab.id ? 'active' : ''}`}
+              onClick={() => handleTabChange(tab.id)}
+            >
+              <span className="tab-icon">{tab.icon}</span>
+              {tab.label}
+              <span
+                className={`help-dot${helpTab === tab.id ? ' active' : ''}`}
+                onMouseEnter={(e) => { e.stopPropagation(); setHelpTab(tab.id); }}
+                onMouseLeave={() => setHelpTab(null)}
+              >?</span>
+            </button>
+            {helpTab === tab.id && (
+              <div className="help-popover">
+                <div className="help-popover-inner">
+                  <p>{tab.help}</p>
+                </div>
+              </div>
+            )}
+          </div>
         ))}
       </nav>
 
@@ -328,7 +343,7 @@ export default function App() {
 
         {prefs.tab === 'holiday' && (
           <div className="holiday-section">
-            <div className="holiday-label">VIC Public Holidays · 2026</div>
+            <div className="holiday-label">Upcoming Public Holidays</div>
             <div className="holiday-grid">
               {VIC_HOLIDAYS_2026.map((h, i) => {
                 const past = isHolidayPast(h);
@@ -338,7 +353,7 @@ export default function App() {
                     className={`holiday-card ${prefs.holidayIndex === i ? 'active' : ''} ${past ? 'past' : ''}`}
                     onClick={() => handleHolidaySelect(i)}
                   >
-                    <span className="holiday-name">{h.name}</span>
+                    <span className="holiday-name">{h.name}{h.year && h.year !== new Date().getFullYear() ? ` ${h.year}` : ''}</span>
                     <span className="holiday-meta">{h.desc} · {h.nights} nights</span>
                   </button>
                 );
@@ -351,33 +366,14 @@ export default function App() {
           const nights = calcNights(prefs.customDate, prefs.customCheckout);
           return (
             <div className="custom-row">
-              <div className="custom-field">
-                <label>Check-in</label>
-                <input
-                  type="date"
-                  value={prefs.customDate}
-                  min={TODAY}
-                  max={MAX_DATE}
-                  onChange={(e) => {
-                    const newDate = e.target.value;
-                    const updates = { customDate: newDate };
-                    if (prefs.customCheckout <= newDate) {
-                      updates.customCheckout = formatDate(addDays(new Date(newDate + 'T00:00:00'), 1));
-                    }
-                    updatePrefs(updates);
-                  }}
-                />
-              </div>
-              <div className="custom-field">
-                <label>Check-out</label>
-                <input
-                  type="date"
-                  value={prefs.customCheckout}
-                  min={prefs.customDate ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 1)) : undefined}
-                  max={prefs.customDate ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 14)) < MAX_DATE ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 14)) : MAX_DATE : MAX_DATE}
-                  onChange={(e) => updatePrefs({ customCheckout: e.target.value })}
-                />
-              </div>
+              <DateRangePicker
+                checkIn={prefs.customDate}
+                checkOut={prefs.customCheckout}
+                minDate={TODAY}
+                maxDate={MAX_DATE}
+                maxNights={14}
+                onChange={(ci, co) => updatePrefs({ customDate: ci, customCheckout: co })}
+              />
               {nights > 0 && (
                 <div className={`nights-badge ${nights > 14 ? 'over' : ''}`}>{nights > 14 ? 'Exceeds 14 nights' : `${nights} nights`}</div>
               )}
@@ -471,31 +467,14 @@ export default function App() {
                   </div>
                 </div>
                 <div className="fav-form-row">
-                  <div className="custom-field">
-                    <label>Check-in</label>
-                    <input
-                      type="date"
-                      value={favDate}
-                      min={TODAY}
-                      max={MAX_DATE}
-                      onChange={(e) => {
-                        setFavDate(e.target.value);
-                        if (favCheckout <= e.target.value) {
-                          setFavCheckout(formatDate(addDays(new Date(e.target.value + 'T00:00:00'), 1)));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="custom-field">
-                    <label>Check-out</label>
-                    <input
-                      type="date"
-                      value={favCheckout}
-                      min={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 1)) : undefined}
-                      max={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) < MAX_DATE ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) : MAX_DATE : MAX_DATE}
-                      onChange={(e) => setFavCheckout(e.target.value)}
-                    />
-                  </div>
+                  <DateRangePicker
+                    checkIn={favDate}
+                    checkOut={favCheckout}
+                    minDate={TODAY}
+                    maxDate={MAX_DATE}
+                    maxNights={14}
+                    onChange={(ci, co) => { setFavDate(ci); setFavCheckout(co); }}
+                  />
                 </div>
                 <CampsiteFilter selected={favFilter} onChange={setFavFilter} />
                 <div className="fav-form-actions">
@@ -735,9 +714,9 @@ async function queryWeekend(offset) {
   ]);
 
   const options = [
-    { title: `Full Weekend ${formatDisplayDate(friday)} → ${formatDisplayDate(sunday)}`, nights: '2 nights', items: parseAvailability(friToSun), highlight: true },
-    { title: `${formatDisplayDate(friday)} → ${formatDisplayDate(saturday)}`, nights: '1 night', items: parseAvailability(friToSat) },
-    { title: `${formatDisplayDate(saturday)} → ${formatDisplayDate(sunday)}`, nights: '1 night', items: parseAvailability(satToSun) },
+    { title: `Full Weekend ${formatDisplayDate(friday)} → ${formatDisplayDate(sunday)}`, nights: '2 nights', items: parseAvailability(friToSun), highlight: true, checkIn: formatDate(friday), checkOut: formatDate(sunday) },
+    { title: `${formatDisplayDate(friday)} → ${formatDisplayDate(saturday)}`, nights: '1 night', items: parseAvailability(friToSat), checkIn: formatDate(friday), checkOut: formatDate(saturday) },
+    { title: `${formatDisplayDate(saturday)} → ${formatDisplayDate(sunday)}`, nights: '1 night', items: parseAvailability(satToSun), checkIn: formatDate(saturday), checkOut: formatDate(sunday) },
   ];
 
   return { type: 'weekend', options };
@@ -760,6 +739,8 @@ async function queryHoliday(holiday) {
       nights: `${holiday.nights} nights`,
       items: parseAvailability(fullData),
       highlight: true,
+      checkIn: holiday.date,
+      checkOut: formatDate(end),
     },
     ...nightData.map((data, i) => {
       const d = addDays(start, i);
@@ -768,6 +749,8 @@ async function queryHoliday(holiday) {
         title: `${formatDisplayDate(d)} → ${formatDisplayDate(next)}`,
         nights: '1 night',
         items: parseAvailability(data),
+        checkIn: formatDate(d),
+        checkOut: formatDate(next),
       };
     }),
   ];
@@ -793,6 +776,8 @@ async function queryCustom(dateStr, nights) {
       nights: `${nights} nights`,
       items: parseAvailability(fullData),
       highlight: true,
+      checkIn: dateStr,
+      checkOut: formatDate(end),
     },
     ...nightData.map((data, i) => {
       const d = addDays(start, i);
@@ -801,6 +786,8 @@ async function queryCustom(dateStr, nights) {
         title: `${formatDisplayDate(d)} → ${formatDisplayDate(next)}`,
         nights: '1 night',
         items: parseAvailability(data),
+        checkIn: formatDate(d),
+        checkOut: formatDate(next),
       };
     }),
   ];
