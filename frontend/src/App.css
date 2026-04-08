@@ -734,6 +734,198 @@ select option {
   border-radius: 100px;
 }
 
+/* ── Favourites ── */
+.fav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fav-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  background: var(--bg-surface);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.fav-add-btn:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.fav-add-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.fav-form {
+  padding: 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fav-form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.fav-form-row .custom-field {
+  flex: 1;
+}
+
+.fav-form .custom-field input[type="text"] {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-bright);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fav-form .custom-field input[type="text"]:focus {
+  border-color: var(--accent);
+}
+
+.fav-form .custom-field input[type="text"]::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.fav-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.fav-cancel-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.fav-cancel-btn:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+
+.fav-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.fav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fav-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.fav-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.fav-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fav-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.fav-item-dates {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fav-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.fav-item-status {
+  font-size: 12px;
+}
+
+.loading-text {
+  color: var(--text-secondary);
+}
+
+.error-text {
+  color: var(--red);
+}
+
+.fav-remove-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  transition: all 0.15s ease;
+}
+
+.fav-remove-btn:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.fav-item-results {
+  padding: 0 16px 16px;
+}
+
 /* ── Footer ── */
 .footer {
   text-align: center;

@@ -1,0 +1,19 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "serverless deploy",
+    "remove": "serverless remove"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0",
+    "@aws-sdk/client-ses": "^3.700.0",
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "serverless": "^4.0.0",
+    "serverless-offline": "^14.0.0"
+  }
+}

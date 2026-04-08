@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePreferences } from './hooks/usePreferences';
+import { useFavourites } from './hooks/useFavourites';
 import { VIC_HOLIDAYS_2026 } from './data/holidays';
 import { fetchAvailability, parseAvailability } from './utils/api';
 import { formatDate, formatDisplayDate, getWeekendDates, addDays, isHolidayPast } from './utils/dates';
@@ -11,6 +12,7 @@ const TABS = [
   { id: 'weekend', label: '周末', icon: '◐', help: '快速查询最近8周的周末营地空位。选择后自动查询，显示完整周末（2晚）和每晚的空位情况。' },
   { id: 'holiday', label: '节假日', icon: '⟡', help: '快速查询维州公共假期的营地空位。点选假期自动查询，显示整段假期和每晚的空位情况。' },
   { id: 'custom', label: '自定义', icon: '◈', help: '自己挑入住和离开日期，最长 14 晚。选好日期后点「开始查询」。' },
+  { id: 'favourites', label: '收藏', icon: '☆', help: '保存关注的日期段，打开页面自动查询所有收藏的空位情况。' },
 ];
 
 const WEEKEND_LABELS = ['这周末', '下周末', '下下周末', '往后第4周', '往后第5周', '往后第6周', '往后第7周', '往后第8周'];
@@ -32,10 +34,16 @@ function calcNights(checkIn, checkOut) {
 
 export default function App() {
   const [prefs, updatePrefs] = usePreferences();
+  const { favourites, addFavourite, removeFavourite } = useFavourites();
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [helpTab, setHelpTab] = useState(null);
+  const [showAddFav, setShowAddFav] = useState(false);
+  const [favResults, setFavResults] = useState({});  // { [id]: { loading, results, error } }
+  const [favDate, setFavDate] = useState(formatDate(addDays(new Date(), 1)));
+  const [favCheckout, setFavCheckout] = useState(formatDate(addDays(new Date(), 3)));
+  const [favName, setFavName] = useState('');
 
   const query = useCallback(async (tab, opts) => {
     setLoading(true);
@@ -63,8 +71,32 @@ export default function App() {
     }
   }, []);
 
+  // Query all favourites
+  const queryAllFavourites = useCallback(async (favList) => {
+    if (!favList || favList.length === 0) return;
+    const newResults = {};
+    for (const fav of favList) {
+      newResults[fav.id] = { loading: true, results: null, error: null };
+    }
+    setFavResults({ ...newResults });
+
+    await Promise.all(favList.map(async (fav) => {
+      try {
+        const nights = calcNights(fav.checkIn, fav.checkOut);
+        const data = await queryCustom(fav.checkIn, nights);
+        setFavResults((prev) => ({ ...prev, [fav.id]: { loading: false, results: data, error: null } }));
+      } catch (e) {
+        setFavResults((prev) => ({ ...prev, [fav.id]: { loading: false, results: null, error: e.message } }));
+      }
+    }));
+  }, []);
+
   // Auto-query on mount
   useEffect(() => {
+    if (prefs.tab === 'favourites') {
+      queryAllFavourites(favourites);
+      return;
+    }
     if (prefs.tab === 'holiday' && prefs.holidayIndex < 0) return;
     query(prefs.tab, prefs);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,7 +109,30 @@ export default function App() {
       query(tab, { ...prefs, tab });
     } else if (tab === 'holiday' && prefs.holidayIndex >= 0) {
       query(tab, { ...prefs, tab });
+    } else if (tab === 'favourites') {
+      queryAllFavourites(favourites);
     }
+  };
+
+  const handleAddFav = () => {
+    const nights = calcNights(favDate, favCheckout);
+    if (nights <= 0) return;
+    const newFav = { name: favName || `${favDate} → ${favCheckout}`, checkIn: favDate, checkOut: favCheckout };
+    addFavourite(newFav);
+    setShowAddFav(false);
+    setFavName('');
+    // Query the newly added fav
+    const id = Date.now(); // approximate the id that was just assigned
+    setTimeout(() => queryAllFavourites([...favourites, { ...newFav, id }]), 50);
+  };
+
+  const handleRemoveFav = (id) => {
+    removeFavourite(id);
+    setFavResults((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const handleWeekendChange = (offset) => {
@@ -214,11 +269,122 @@ export default function App() {
             </div>
           );
         })()}
+
+        {prefs.tab === 'favourites' && (
+          <div className="fav-section">
+            {/* Add button / form */}
+            {!showAddFav ? (
+              <button className="fav-add-btn" onClick={() => setShowAddFav(true)}>
+                <span className="fav-add-icon">+</span>
+                添加监测
+              </button>
+            ) : (
+              <div className="fav-form">
+                <div className="fav-form-row">
+                  <div className="custom-field">
+                    <label>备注名称</label>
+                    <input
+                      type="text"
+                      placeholder="如：赛马节"
+                      value={favName}
+                      onChange={(e) => setFavName(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="fav-form-row">
+                  <div className="custom-field">
+                    <label>入住日期</label>
+                    <input
+                      type="date"
+                      value={favDate}
+                      onChange={(e) => {
+                        setFavDate(e.target.value);
+                        if (favCheckout <= e.target.value) {
+                          setFavCheckout(formatDate(addDays(new Date(e.target.value + 'T00:00:00'), 1)));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="custom-field">
+                    <label>离开日期</label>
+                    <input
+                      type="date"
+                      value={favCheckout}
+                      min={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 1)) : undefined}
+                      max={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) : undefined}
+                      onChange={(e) => setFavCheckout(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="fav-form-actions">
+                  <button className="query-btn" onClick={handleAddFav} disabled={calcNights(favDate, favCheckout) <= 0}>
+                    添加
+                  </button>
+                  <button className="fav-cancel-btn" onClick={() => { setShowAddFav(false); setFavName(''); }}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Favourite list */}
+            {favourites.length === 0 && !showAddFav && (
+              <div className="fav-empty">还没有收藏，点击上方「添加监测」开始</div>
+            )}
+
+            <div className="fav-list">
+              {favourites.map((fav) => {
+                const nights = calcNights(fav.checkIn, fav.checkOut);
+                const startDate = new Date(fav.checkIn + 'T00:00:00');
+                const endDate = new Date(fav.checkOut + 'T00:00:00');
+                const fr = favResults[fav.id];
+
+                return (
+                  <div key={fav.id} className="fav-item">
+                    <div className="fav-item-header">
+                      <div className="fav-item-info">
+                        <span className="fav-item-name">{fav.name}</span>
+                        <span className="fav-item-dates">
+                          {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {nights}晚
+                        </span>
+                      </div>
+                      <div className="fav-item-actions">
+                        {fr?.loading && (
+                          <span className="fav-item-status loading-text">查询中...</span>
+                        )}
+                        {fr?.error && (
+                          <span className="fav-item-status error-text">查询失败</span>
+                        )}
+                        {fr?.results && !fr.loading && (
+                          <span className={`status-badge ${fr.results.options[0]?.items?.length > 0 ? 'green' : 'red'}`}>
+                            {fr.results.options[0]?.items?.length > 0
+                              ? `${fr.results.options[0].items.reduce((s, i) => s + (typeof i.numAvailable === 'number' ? i.numAvailable : 0), 0)}个空位`
+                              : '已满'}
+                          </span>
+                        )}
+                        <button className="fav-remove-btn" onClick={() => handleRemoveFav(fav.id)} title="删除">×</button>
+                      </div>
+                    </div>
+                    {fr?.results && !fr.loading && (
+                      <div className="fav-item-results">
+                        <div className="options-list">
+                          {fr.results.options.map((opt, j) => (
+                            <OptionCard key={j} option={opt} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Results */}
+      {/* Results (non-favourites) */}
       <div className="results">
-        {loading && (
+        {loading && prefs.tab !== 'favourites' && (
           <div className="loading">
             <div className="loading-dots">
               <span /><span /><span />
@@ -227,7 +393,7 @@ export default function App() {
           </div>
         )}
 
-        {error && (
+        {error && prefs.tab !== 'favourites' && (
           <div className="error-card">
             <span className="error-icon">!</span>
             <div>
@@ -237,7 +403,7 @@ export default function App() {
           </div>
         )}
 
-        {results && !loading && <ResultsView results={results} />}
+        {results && !loading && prefs.tab !== 'favourites' && <ResultsView results={results} />}
       </div>
 
       <footer className="footer">
