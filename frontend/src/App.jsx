@@ -5,6 +5,8 @@ import { useSettings } from './hooks/useSettings';
 import { useAuth } from './hooks/useAuth';
 import AuthModal from './components/AuthModal';
 import CampsiteFilter from './components/CampsiteFilter';
+import GuideModal from './components/GuideModal';
+import { useTheme } from './hooks/useTheme';
 import { VIC_HOLIDAYS_2026 } from './data/holidays';
 import { fetchAvailability, parseAvailability, fetchUnitAvailability, parseUnitAvailability } from './utils/api';
 import { formatDate, formatDisplayDate, getWeekendDates, addDays, isHolidayPast } from './utils/dates';
@@ -41,6 +43,7 @@ const TODAY = formatDate(new Date());
 const MAX_DATE = formatDate(addDays(new Date(), 240));
 
 export default function App() {
+  const { mode, resolved, cycle } = useTheme();
   const [prefs, updatePrefs] = usePreferences();
   const { user, checking: authChecking, signOut, refresh: refreshAuth } = useAuth();
   const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, toggleNotify, loading: favsLoading } = useFavourites();
@@ -48,6 +51,7 @@ export default function App() {
   const [emailInput, setEmailInput] = useState('');
   const [emailEditing, setEmailEditing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tabResults, setTabResults] = useState({}); // { weekend: {...}, holiday: {...}, custom: {...} }
   const [tabErrors, setTabErrors] = useState({});
@@ -281,6 +285,14 @@ export default function App() {
         <p className="header-subtitle">
           Showing drive-in campsites only · Data from Parks Victoria
         </p>
+        <button className="theme-toggle" onClick={cycle} title={`Theme: ${mode}`}>
+          {resolved === 'dark' ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v1M8 14v1M1 8h1M14 8h1M3.05 3.05l.7.7M12.25 12.25l.7.7M3.05 12.95l.7-.7M12.25 3.75l.7-.7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.2"/></svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 9.5a5.5 5.5 0 0 1-7-7A5.5 5.5 0 1 0 13.5 9.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
+          )}
+          {mode === 'system' && <span className="theme-auto">auto</span>}
+        </button>
       </header>
 
       {/* Tab Bar */}
@@ -400,7 +412,7 @@ export default function App() {
             </div>
             <h3 className="fav-gate-title">Favourites & Notifications</h3>
             <p className="fav-gate-desc">
-              Sign in to save date ranges you care about. The system checks availability every 30 minutes and emails you as soon as a spot opens up.
+              Sign in to unlock monitoring — save date ranges, filter specific campsites, and get email alerts every 15 minutes when spots open up.
             </p>
             <button className="fav-gate-btn" onClick={() => setShowAuthModal(true)}>
               Sign In / Sign Up
@@ -731,6 +743,12 @@ export default function App() {
       <footer className="footer">
         <span>Made by Shelton</span>
       </footer>
+
+      <button className="fab-guide" onClick={() => setShowGuide(true)} aria-label="Guide">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="8" stroke="currentColor" strokeWidth="1.5"/><path d="M9 8.5V13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="9" cy="5.5" r="1" fill="currentColor"/></svg>
+      </button>
+
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
