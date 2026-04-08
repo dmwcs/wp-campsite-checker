@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { signIn, signUp, confirmSignUp, resendSignUpCode, resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 
 const VIEWS = {
@@ -17,9 +17,18 @@ export default function AuthModal({ onClose, onSuccess }) {
   const [confirmPw, setConfirmPw] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
 
   const handleError = (e) => {
+    setInfo('');
     const msg = e?.message || 'Operation failed, please try again';
     if (msg.includes('User already exists')) setError('This email is already registered. Please sign in or verify your account.');
     else if (msg.includes('Incorrect username or password')) setError('Incorrect email or password');
@@ -35,19 +44,17 @@ export default function AuthModal({ onClose, onSuccess }) {
     setLoading(true);
     try {
       const result = await signIn({ username: email, password });
+      console.log('signIn result:', result);
       if (result.isSignedIn) {
         onSuccess?.();
         onClose();
+      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
+        setError('Incorrect email or password');
       }
     } catch (err) {
+      console.log('signIn error:', err?.name, err?.message, err);
       if (err?.name === 'UserNotConfirmedException') {
-        try {
-          await resendSignUpCode({ username: email });
-          setError('');
-          setView(VIEWS.CONFIRM);
-        } catch (resendErr) {
-          handleError(resendErr);
-        }
+        setError('Incorrect email or password');
       } else {
         handleError(err);
       }
@@ -78,6 +85,8 @@ export default function AuthModal({ onClose, onSuccess }) {
         try {
           await resendSignUpCode({ username: email });
           setError('');
+          setInfo('A verification code has been sent to your email.');
+          setResendCooldown(60);
           setView(VIEWS.CONFIRM);
         } catch (resendErr) {
           handleError(resendErr);
@@ -172,8 +181,8 @@ export default function AuthModal({ onClose, onSuccess }) {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
             <div className="auth-links">
-              <button type="button" className="auth-link" onClick={() => { setError(''); setView(VIEWS.SIGN_UP); }}>No account? Sign Up</button>
-              <button type="button" className="auth-link" onClick={() => { setError(''); setView(VIEWS.FORGOT); }}>Forgot password</button>
+              <button type="button" className="auth-link" onClick={() => { setError(''); setInfo(''); setView(VIEWS.SIGN_UP); }}>No account? Sign Up</button>
+              <button type="button" className="auth-link" onClick={() => { setError(''); setInfo(''); setView(VIEWS.FORGOT); }}>Forgot password</button>
             </div>
           </form>
         )}
@@ -204,7 +213,7 @@ export default function AuthModal({ onClose, onSuccess }) {
               {loading ? 'Signing up...' : 'Sign Up'}
             </button>
             <div className="auth-links">
-              <button type="button" className="auth-link" onClick={() => { setError(''); setView(VIEWS.SIGN_IN); }}>Already have an account? Sign In</button>
+              <button type="button" className="auth-link" onClick={() => { setError(''); setInfo(''); setView(VIEWS.SIGN_IN); }}>Already have an account? Sign In</button>
             </div>
           </form>
         )}
@@ -222,20 +231,23 @@ export default function AuthModal({ onClose, onSuccess }) {
                 <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter 6-digit code" required autoFocus />
               </div>
             </div>
+            {info && <div className="auth-info">{info}</div>}
             {error && <div className="auth-error">{error}</div>}
             <button type="submit" className="auth-submit" disabled={loading}>
               {loading ? 'Verifying...' : 'Verify & Sign In'}
             </button>
             <div className="auth-links">
-              <button type="button" className="auth-link" onClick={async () => {
+              <button type="button" className="auth-link" disabled={resendCooldown > 0} onClick={async () => {
                 setError('');
+                setInfo('');
                 try {
                   await resendSignUpCode({ username: email });
-                  setError('A new code has been sent.');
+                  setInfo('A new code has been sent.');
+                  setResendCooldown(60);
                 } catch (err) {
                   handleError(err);
                 }
-              }}>Resend code</button>
+              }}>{resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}</button>
             </div>
           </form>
         )}
@@ -258,7 +270,7 @@ export default function AuthModal({ onClose, onSuccess }) {
               {loading ? 'Sending...' : 'Send verification code'}
             </button>
             <div className="auth-links">
-              <button type="button" className="auth-link" onClick={() => { setError(''); setView(VIEWS.SIGN_IN); }}>Back to sign in</button>
+              <button type="button" className="auth-link" onClick={() => { setError(''); setInfo(''); setView(VIEWS.SIGN_IN); }}>Back to sign in</button>
             </div>
           </form>
         )}

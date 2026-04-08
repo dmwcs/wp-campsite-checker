@@ -1253,6 +1253,16 @@ select option {
   margin-bottom: 16px;
 }
 
+.auth-info {
+  padding: 10px 14px;
+  background: var(--blue-dim, rgba(59, 130, 246, 0.08));
+  border: 1px solid var(--blue-border, rgba(59, 130, 246, 0.25));
+  border-radius: var(--radius-sm);
+  color: var(--blue, #3b82f6);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
 .auth-submit {
   width: 100%;
   padding: 12px;
