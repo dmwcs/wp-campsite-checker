@@ -36,7 +36,9 @@ export async function getFavourites(userId) {
     name: item.name,
     checkIn: item.checkIn,
     checkOut: item.checkOut,
+    filter: item.filter || null,
     nights: item.nights || [],
+    notify: item.notify ?? true,
     createdAt: item.createdAt,
   }));
 }
@@ -67,6 +69,7 @@ export async function putFavourite(userId, fav) {
       name: fav.name,
       checkIn: fav.checkIn,
       checkOut: fav.checkOut,
+      filter: fav.filter || null,
       nights,
       createdAt: new Date().toISOString(),
     },
@@ -122,6 +125,16 @@ export async function updateNightStatus(userId, favId, nightDate, status) {
   }));
 }
 
+// Toggle notify on/off
+export async function updateFavouriteNotify(userId, favId, notify) {
+  await db.send(new UpdateCommand({
+    TableName: TABLE,
+    Key: { PK: `USER#${userId}`, SK: `FAV#${favId}` },
+    UpdateExpression: 'SET notify = :n',
+    ExpressionAttributeValues: { ':n': notify },
+  }));
+}
+
 // Update full period status (used by cron)
 export async function updateFullPeriodStatus(userId, favId, status) {
   await db.send(new UpdateCommand({
@@ -155,6 +168,7 @@ export async function getAllActiveFavourites() {
         name: item.name,
         checkIn: item.checkIn,
         checkOut: item.checkOut,
+        filter: item.filter || null,
         fullPeriodStatus: item.fullPeriodStatus || null,
         nights: monitoringNights,
       });

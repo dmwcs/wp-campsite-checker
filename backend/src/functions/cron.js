@@ -1,5 +1,5 @@
 import { getAllActiveFavourites, updateNightStatus, updateFullPeriodStatus, getUserSettings } from '../utils/db.js';
-import { fetchAvailability, parseAvailability } from '../utils/api.js';
+import { fetchAvailability, parseAvailability, fetchUnitAvailability, parseUnitAvailability } from '../utils/api.js';
 import { calcNights } from '../utils/shared.js';
 
 export async function handler() {
@@ -53,22 +53,48 @@ export async function handler() {
   // Check each favourite
   for (const fav of allFavs) {
     const notifications = [];
+    const hasFilter = fav.filter && fav.filter.length > 0;
 
-    // Check per-night
-    for (const night of fav.nights) {
-      const available = dateResults[night.date];
-      if (available === null) continue;
+    if (hasFilter) {
+      // ── Filtered: use unit-level API ──
+      const unitIds = fav.filter.map(f => f.id);
+      for (const night of fav.nights) {
+        try {
+          const data = await fetchUnitAvailability(night.date, 1, unitIds);
+          const units = parseUnitAvailability(data, unitIds);
+          const anyAvailable = units.some(u => u.available);
+          const wasAvailable = night.status === 'available';
+          const newStatus = anyAvailable ? 'available' : 'monitoring';
 
-      const hasAvailability = available.length > 0;
-      const wasAvailable = night.status === 'available';
-      const newStatus = hasAvailability ? 'available' : 'monitoring';
+          if (newStatus !== night.status) {
+            await updateNightStatus(fav.userId, fav.favId, night.date, newStatus);
+          }
 
-      if (newStatus !== night.status) {
-        await updateNightStatus(fav.userId, fav.favId, night.date, newStatus);
+          if (anyAvailable && !wasAvailable) {
+            const availNames = fav.filter.filter(f => units.find(u => u.unitId === f.id && u.available)).map(f => `#${f.name} (${f.room})`);
+            notifications.push({ type: 'unit', date: night.date, nextDate: night.nextDate, sites: availNames });
+          }
+        } catch (e) {
+          console.error(`Cron: unit API error for ${night.date}:`, e.message);
+        }
       }
+    } else {
+      // ── Unfiltered: use avenue-level API ──
+      for (const night of fav.nights) {
+        const available = dateResults[night.date];
+        if (available === null) continue;
 
-      if (hasAvailability && !wasAvailable) {
-        notifications.push({ type: 'night', date: night.date, nextDate: night.nextDate, sites: available });
+        const hasAvailability = available.length > 0;
+        const wasAvailable = night.status === 'available';
+        const newStatus = hasAvailability ? 'available' : 'monitoring';
+
+        if (newStatus !== night.status) {
+          await updateNightStatus(fav.userId, fav.favId, night.date, newStatus);
+        }
+
+        if (hasAvailability && !wasAvailable) {
+          notifications.push({ type: 'night', date: night.date, nextDate: night.nextDate, sites: available });
+        }
       }
     }
 
@@ -112,10 +138,16 @@ async function sendNotification(toEmail, favName, notifications) {
   const ses = new SESClient({});
 
   const sections = notifications.map(n => {
-    const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/night, ${s.numAvailable} left`).join('\n');
+    if (n.type === 'unit') {
+      // Unit-level: sites is an array of strings like "#298 (23rd Ave)"
+      const siteList = n.sites.map(s => `    ${s}`).join('\n');
+      return `  ${n.date} → ${n.nextDate} (1 night)\n    Available sites:\n${siteList}`;
+    }
     if (n.type === 'full') {
+      const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/night, ${s.numAvailable} left`).join('\n');
       return `  FULL PERIOD: ${n.checkIn} → ${n.checkOut} (${n.nights} nights)\n${siteList}`;
     }
+    const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/night, ${s.numAvailable} left`).join('\n');
     return `  ${n.date} → ${n.nextDate} (1 night)\n${siteList}`;
   }).join('\n\n');
 

@@ -1,4 +1,4 @@
-import { getFavourites, putFavourite, deleteFavourite, markNightBooked, updateNightStatus } from '../utils/db.js';
+import { getFavourites, putFavourite, deleteFavourite, markNightBooked, updateNightStatus, updateFavouriteNotify } from '../utils/db.js';
 import { json } from '../utils/response.js';
 
 function getUserId(event) {
@@ -26,6 +26,7 @@ export async function create(event) {
       name: body.name || `${body.checkIn} → ${body.checkOut}`,
       checkIn: body.checkIn,
       checkOut: body.checkOut,
+      filter: body.filter || null,
     });
     return json(201, { id });
   } catch (e) {
@@ -41,6 +42,19 @@ export async function booked(event) {
     if (!favId || !body.date) return json(400, { error: 'id and date are required' });
     await markNightBooked(userId, favId, body.date);
     return json(200, { marked: true });
+  } catch (e) {
+    return json(500, { error: e.message });
+  }
+}
+
+export async function toggleNotify(event) {
+  try {
+    const userId = getUserId(event);
+    const favId = event.pathParameters?.id;
+    const body = JSON.parse(event.body || '{}');
+    if (!favId) return json(400, { error: 'id is required' });
+    await updateFavouriteNotify(userId, favId, body.notify ?? true);
+    return json(200, { updated: true });
   } catch (e) {
     return json(500, { error: e.message });
   }

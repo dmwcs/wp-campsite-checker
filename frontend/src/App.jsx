@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePreferences } from './hooks/usePreferences';
 import { useFavourites } from './hooks/useFavourites';
 import { useSettings } from './hooks/useSettings';
 import { useAuth } from './hooks/useAuth';
 import AuthModal from './components/AuthModal';
+import CampsiteFilter from './components/CampsiteFilter';
 import { VIC_HOLIDAYS_2026 } from './data/holidays';
-import { fetchAvailability, parseAvailability } from './utils/api';
+import { fetchAvailability, parseAvailability, fetchUnitAvailability, parseUnitAvailability } from './utils/api';
 import { formatDate, formatDisplayDate, getWeekendDates, addDays, isHolidayPast } from './utils/dates';
 import './App.css';
 
@@ -42,7 +43,7 @@ const MAX_DATE = formatDate(addDays(new Date(), 240));
 export default function App() {
   const [prefs, updatePrefs] = usePreferences();
   const { user, checking: authChecking, signOut, refresh: refreshAuth } = useAuth();
-  const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, loading: favsLoading } = useFavourites();
+  const { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, toggleNotify, loading: favsLoading } = useFavourites();
   const { settings, updateEmail } = useSettings();
   const [emailInput, setEmailInput] = useState('');
   const [emailEditing, setEmailEditing] = useState(false);
@@ -55,8 +56,10 @@ export default function App() {
   const [favDate, setFavDate] = useState(formatDate(addDays(new Date(), 1)));
   const [favCheckout, setFavCheckout] = useState(formatDate(addDays(new Date(), 3)));
   const [favName, setFavName] = useState('');
+  const [favFilter, setFavFilter] = useState([]);
   const [liveStatus, setLiveStatus] = useState({}); // { [date]: { status, items } }
-  const [liveFullPeriod, setLiveFullPeriod] = useState({}); // { [favId]: { status, items, checking } }
+  const [liveFullPeriod, setLiveFullPeriod] = useState({}); // { [favId]: { status, items } }
+  const [liveUnits, setLiveUnits] = useState({}); // { [favId_date]: [{ unitId, available, ... }] }
 
   const query = useCallback(async (tab, opts) => {
     setLoading(true);
@@ -90,43 +93,46 @@ export default function App() {
 
   // Live check all monitoring nights + full periods
   const checkFavouritesLive = useCallback(async (favList) => {
+    // Split into filtered (unit-level) and unfiltered (avenue-level)
+    const unfilteredFavs = favList.filter(f => !f.filter || f.filter.length === 0);
+    const filteredFavs = favList.filter(f => f.filter && f.filter.length > 0);
+
+    // ── Unfiltered: use existing avenue-level API ──
     const datesToCheck = new Set();
-    for (const fav of favList) {
+    for (const fav of unfilteredFavs) {
       for (const n of (fav.nights || [])) {
         if (n.status !== 'booked') datesToCheck.add(n.date);
       }
     }
-    if (datesToCheck.size === 0) return;
 
-    // Mark all as checking
-    const init = {};
-    for (const d of datesToCheck) init[d] = { status: 'checking', items: [] };
-    setLiveStatus(init);
+    if (datesToCheck.size > 0) {
+      const init = {};
+      for (const d of datesToCheck) init[d] = { status: 'checking', items: [] };
+      setLiveStatus(init);
 
-    // Mark full periods as checking
+      await Promise.all([...datesToCheck].map(async (date) => {
+        try {
+          const data = await fetchAvailability(date, 1);
+          const avail = parseAvailability(data);
+          setLiveStatus((prev) => ({
+            ...prev,
+            [date]: { status: avail.length > 0 ? 'available' : 'full', items: avail },
+          }));
+        } catch {
+          setLiveStatus((prev) => ({ ...prev, [date]: { status: 'error', items: [] } }));
+        }
+      }));
+    }
+
+    // Full period for unfiltered
     const fpInit = {};
-    for (const fav of favList) {
+    for (const fav of unfilteredFavs) {
       const unbooked = (fav.nights || []).filter(n => n.status !== 'booked');
       if (unbooked.length > 1) fpInit[fav.id] = { status: 'checking', items: [] };
     }
     setLiveFullPeriod(fpInit);
 
-    // Query per-night in parallel
-    await Promise.all([...datesToCheck].map(async (date) => {
-      try {
-        const data = await fetchAvailability(date, 1);
-        const avail = parseAvailability(data);
-        setLiveStatus((prev) => ({
-          ...prev,
-          [date]: { status: avail.length > 0 ? 'available' : 'full', items: avail },
-        }));
-      } catch {
-        setLiveStatus((prev) => ({ ...prev, [date]: { status: 'error', items: [] } }));
-      }
-    }));
-
-    // Query full period for each favourite
-    await Promise.all(favList.map(async (fav) => {
+    await Promise.all(unfilteredFavs.map(async (fav) => {
       const unbooked = (fav.nights || []).filter(n => n.status !== 'booked');
       if (unbooked.length <= 1) return;
       try {
@@ -141,18 +147,79 @@ export default function App() {
         setLiveFullPeriod((prev) => ({ ...prev, [fav.id]: { status: 'error', items: [] } }));
       }
     }));
+
+    // ── Filtered: use unit-level API ──
+    if (filteredFavs.length > 0) {
+      // Mark as checking
+      const unitInit = {};
+      for (const fav of filteredFavs) {
+        for (const n of (fav.nights || [])) {
+          if (n.status !== 'booked') unitInit[`${fav.id}_${n.date}`] = null; // null = checking
+        }
+      }
+      setLiveUnits(unitInit);
+
+      await Promise.all(filteredFavs.map(async (fav) => {
+        const unitIds = fav.filter.map(f => f.id);
+        const unbookedNights = (fav.nights || []).filter(n => n.status !== 'booked');
+
+        // Full period unit-level check
+        if (unbookedNights.length > 1) {
+          const fpKey = fav.id;
+          setLiveFullPeriod((prev) => ({ ...prev, [fpKey]: { status: 'checking', items: [] } }));
+          try {
+            const nights = calcNights(fav.checkIn, fav.checkOut);
+            const data = await fetchUnitAvailability(fav.checkIn, nights, unitIds);
+            const units = parseUnitAvailability(data, unitIds);
+            const results = fav.filter.map(f => {
+              const found = units.find(u => u.unitId === f.id);
+              return { id: f.id, name: f.name, room: f.room, available: found ? found.available : false };
+            });
+            const anyAvail = results.some(r => r.available);
+            setLiveFullPeriod((prev) => ({
+              ...prev,
+              [fpKey]: { status: anyAvail ? 'available' : 'full', items: results, isUnit: true },
+            }));
+          } catch {
+            setLiveFullPeriod((prev) => ({ ...prev, [fpKey]: { status: 'error', items: [] } }));
+          }
+        }
+
+        // Per-night unit-level check
+        await Promise.all(unbookedNights.map(async (night) => {
+          const key = `${fav.id}_${night.date}`;
+          try {
+            const data = await fetchUnitAvailability(night.date, 1, unitIds);
+            const units = parseUnitAvailability(data, unitIds);
+            const results = fav.filter.map(f => {
+              const found = units.find(u => u.unitId === f.id);
+              return { id: f.id, name: f.name, room: f.room, available: found ? found.available : false, cost: found?.cost || 0 };
+            });
+            setLiveUnits((prev) => ({ ...prev, [key]: results }));
+          } catch {
+            setLiveUnits((prev) => ({ ...prev, [key]: fav.filter.map(f => ({ ...f, available: false, error: true })) }));
+          }
+        }));
+      }));
+    }
   }, []);
 
-  // Auto-check when favourites load
+  // Auto-check when favourites first load (not on every state change)
+  const favsCheckedRef = useRef(false);
   useEffect(() => {
-    if (prefs.tab === 'favourites' && user && favourites.length > 0 && !favsLoading) {
+    if (prefs.tab === 'favourites' && user && favourites.length > 0 && !favsLoading && !favsCheckedRef.current) {
+      favsCheckedRef.current = true;
       checkFavouritesLive(favourites);
     }
-  }, [prefs.tab, user, favourites, favsLoading, checkFavouritesLive]);
+    if (prefs.tab !== 'favourites') {
+      favsCheckedRef.current = false;
+    }
+  }, [prefs.tab, user, favsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-query on mount
+  // Auto-query on mount (skip custom and favourites)
   useEffect(() => {
-    if (prefs.tab === 'favourites') return; // favourites load from API automatically
+    if (prefs.tab === 'favourites') return;
+    if (prefs.tab === 'custom') return;
     if (prefs.tab === 'holiday' && prefs.holidayIndex < 0) return;
     query(prefs.tab, prefs);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -170,10 +237,16 @@ export default function App() {
   const handleAddFav = async () => {
     const nights = calcNights(favDate, favCheckout);
     if (nights <= 0) return;
-    const newFav = { name: favName || `${favDate} → ${favCheckout}`, checkIn: favDate, checkOut: favCheckout };
+    const newFav = {
+      name: favName || `${favDate} → ${favCheckout}`,
+      checkIn: favDate,
+      checkOut: favCheckout,
+      filter: favFilter.length > 0 ? favFilter : null,
+    };
     await addFavourite(newFav);
     setShowAddFav(false);
     setFavName('');
+    setFavFilter([]);
   };
 
   const handleRemoveFav = (id, name) => {
@@ -338,6 +411,10 @@ export default function App() {
         {prefs.tab === 'favourites' && user && (
           <div className="fav-section">
             <div className="fav-user-bar">
+              <button className="fav-refresh-btn" onClick={() => checkFavouritesLive(favourites)} title="Refresh all monitors">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M14 8A6 6 0 1 1 8 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M8 1v3h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Refresh
+              </button>
               <span className="fav-user-email">{user?.signInDetails?.loginId || user?.username}</span>
               <button className="sign-out-btn" onClick={signOut}>Sign Out</button>
             </div>
@@ -422,11 +499,12 @@ export default function App() {
                     />
                   </div>
                 </div>
+                <CampsiteFilter selected={favFilter} onChange={setFavFilter} />
                 <div className="fav-form-actions">
                   <button className="query-btn" onClick={handleAddFav} disabled={calcNights(favDate, favCheckout) <= 0}>
                     Add
                   </button>
-                  <button className="fav-cancel-btn" onClick={() => { setShowAddFav(false); setFavName(''); }}>
+                  <button className="fav-cancel-btn" onClick={() => { setShowAddFav(false); setFavName(''); setFavFilter([]); }}>
                     Cancel
                   </button>
                 </div>
@@ -453,10 +531,29 @@ export default function App() {
                       <div className="mon-head-left">
                         <h3 className="mon-title">{fav.name}</h3>
                         <span className="mon-range">{formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {totalNights} nights</span>
+                        {fav.filter && fav.filter.length > 0 && (
+                          <div className="mon-filter-tags">
+                            {fav.filter.map(f => (
+                              <span key={f.id} className="mon-filter-tag">{f.room} #{f.name}</span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="mon-head-right">
+                        <a className="mon-book-link" href={BOOKING_URL} target="_blank" rel="noopener noreferrer">Book</a>
                         {liveAvailCount > 0 && <span className="mon-pill green">{liveAvailCount} available</span>}
                         {bookedCount > 0 && <span className="mon-pill teal">{bookedCount} booked</span>}
+                        <button
+                          className={`mon-notify ${fav.notify !== false ? 'on' : 'off'}`}
+                          onClick={() => toggleNotify(fav.id, fav.notify !== false)}
+                          title={fav.notify !== false ? 'Email notifications on' : 'Email notifications off'}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path d="M8 1.5C5.5 1.5 4 3.5 4 5.5V8L2.5 10.5H13.5L12 8V5.5C12 3.5 10.5 1.5 8 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                            <path d="M6.5 11.5C6.5 12.3 7.2 13 8 13C8.8 13 9.5 12.3 9.5 11.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                            {fav.notify === false && <path d="M2 2L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>}
+                          </svg>
+                        </button>
                         <button className="mon-delete" onClick={() => handleRemoveFav(fav.id, fav.name)} aria-label="Remove">
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11 3L3 11M3 3l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                         </button>
@@ -476,25 +573,57 @@ export default function App() {
                     {liveFullPeriod[fav.id] && totalNights > 1 && (() => {
                       const fp = liveFullPeriod[fav.id];
                       const fpItems = fp.items || [];
-                      const fpOption = fp.status === 'available' ? {
-                        title: `Full period ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}`,
-                        nights: `${totalNights} nights`,
-                        items: fpItems,
-                      } : null;
+                      const isUnitLevel = fp.isUnit;
                       return (
                         <div className="mon-full-period">
                           {fp.status === 'checking' && (
                             <div className="mn-row"><div className="mn-row-head"><span className="mn-tag muted">Checking full period...</span></div></div>
                           )}
-                          {fp.status === 'available' && fpOption && (
-                            <OptionCard option={fpOption} />
+                          {fp.status === 'available' && !isUnitLevel && (
+                            <OptionCard option={{
+                              title: `Full period ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}`,
+                              nights: `${totalNights} nights`,
+                              items: fpItems,
+                            }} />
                           )}
-                          {fp.status === 'full' && (
+                          {fp.status === 'available' && isUnitLevel && (
+                            <div className="mn-row available">
+                              <div className="mn-row-head">
+                                <div className="mn-dot available" />
+                                <span className="mn-date">Full period {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)}</span>
+                                <div className="mn-row-right"><span className="mn-tag green">{totalNights} nights</span></div>
+                              </div>
+                              <div className="mn-unit-row">
+                                {fpItems.map(u => (
+                                  <span key={u.id} className={`mn-unit-pill ${u.available ? 'avail' : 'full'}`}>
+                                    #{u.name}<span className="mn-unit-dot">{u.available ? '✓' : '✕'}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {fp.status === 'full' && !isUnitLevel && (
                             <div className="mn-row"><div className="mn-row-head">
                               <div className="mn-dot full" />
                               <span className="mn-date full">Full period {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)}</span>
                               <div className="mn-row-right"><span className="mn-tag muted">{totalNights} nights · Full</span></div>
                             </div></div>
+                          )}
+                          {fp.status === 'full' && isUnitLevel && (
+                            <div className="mn-row">
+                              <div className="mn-row-head">
+                                <div className="mn-dot full" />
+                                <span className="mn-date full">Full period {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)}</span>
+                                <div className="mn-row-right"><span className="mn-tag muted">{totalNights} nights</span></div>
+                              </div>
+                              <div className="mn-unit-row">
+                                {fpItems.map(u => (
+                                  <span key={u.id} className={`mn-unit-pill ${u.available ? 'avail' : 'full'}`}>
+                                    #{u.name}<span className="mn-unit-dot">{u.available ? '✓' : '✕'}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       );
@@ -507,6 +636,40 @@ export default function App() {
                       {(fav.nights || []).map((night) => {
                         const d = new Date(night.date + 'T00:00:00');
                         const nd = new Date(night.nextDate + 'T00:00:00');
+                        const hasFilter = fav.filter && fav.filter.length > 0;
+
+                        if (hasFilter) {
+                          const unitKey = `${fav.id}_${night.date}`;
+                          const unitResults = liveUnits[unitKey];
+                          const isUnitChecking = unitResults === null;
+                          const anyAvailable = unitResults && unitResults.some(u => u.available);
+                          const availCount = unitResults ? unitResults.filter(u => u.available).length : 0;
+                          const effectiveStatus = night.status === 'booked' ? 'booked'
+                            : anyAvailable ? 'available' : 'full';
+
+                          // Build items compatible with FavNightRow
+                          const siteItems = unitResults ? unitResults.filter(u => u.available).map(u => ({
+                            operator: u.room,
+                            name: `#${u.name} (${u.room})`,
+                            cost: u.cost || 0,
+                            numAvailable: 1,
+                          })) : [];
+
+                          return <FavNightRow
+                            key={night.date}
+                            date={d}
+                            nextDate={nd}
+                            status={effectiveStatus}
+                            isChecking={isUnitChecking && night.status !== 'booked'}
+                            totalSpots={availCount}
+                            siteItems={siteItems}
+                            unitResults={unitResults}
+                            onMarkBooked={() => markBooked(fav.id, night.date)}
+                            onUnmark={() => unmarkBooked(fav.id, night.date)}
+                          />;
+                        }
+
+                        // Unfiltered: existing avenue-level display
                         const live = liveStatus[night.date];
                         const effectiveStatus = night.status === 'booked' ? 'booked'
                           : live?.status === 'available' ? 'available'
@@ -683,9 +846,11 @@ function ResultsView({ results }) {
   );
 }
 
-function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems, onMarkBooked, onUnmark }) {
+function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems, unitResults, onMarkBooked, onUnmark }) {
   const [expanded, setExpanded] = useState(false);
-  const hasDetails = status === 'available' && siteItems.length > 0;
+  const hasAvailDetails = status === 'available' && siteItems.length > 0;
+  const hasUnitDetails = unitResults && unitResults.length > 0 && status !== 'booked';
+  const canExpand = hasAvailDetails || hasUnitDetails;
 
   // Group sites by operator
   const grouped = {};
@@ -697,8 +862,8 @@ function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems
   return (
     <div className={`mn-row ${status} ${expanded ? 'expanded' : ''}`}>
       <div
-        className={`mn-row-head ${hasDetails ? 'clickable' : ''}`}
-        onClick={() => hasDetails && setExpanded(!expanded)}
+        className={`mn-row-head ${canExpand ? 'clickable' : ''}`}
+        onClick={() => canExpand && setExpanded(!expanded)}
       >
         <div className={`mn-dot ${status}`} />
         <span className={`mn-date ${status}`}>
@@ -711,14 +876,15 @@ function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems
             <>
               <span className="mn-tag muted">Full</span>
               <button className="mn-action" onClick={(e) => { e.stopPropagation(); onMarkBooked(); }}>Mark booked</button>
+              {hasUnitDetails && <svg className={`mn-chevron ${expanded ? 'open' : ''}`} width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
             </>
           )}
 
           {!isChecking && status === 'available' && (
             <>
               <span className="mn-tag green">{totalSpots} spots</span>
-              <a className="mn-book" href={BOOKING_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>Book</a>
-              <svg className={`mn-chevron ${expanded ? 'open' : ''}`} width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <button className="mn-action" onClick={(e) => { e.stopPropagation(); onMarkBooked(); }}>Mark booked</button>
+              {canExpand && <svg className={`mn-chevron ${expanded ? 'open' : ''}`} width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
             </>
           )}
 
@@ -731,9 +897,22 @@ function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems
         </div>
       </div>
 
-      {expanded && hasDetails && (
+      {expanded && canExpand && (
         <div className="mn-details">
-          {Object.entries(grouped).map(([operatorName, items]) => (
+          {/* Unit-level details (filtered monitors) */}
+          {hasUnitDetails && (
+            <div className="mn-unit-detail-list">
+              {unitResults.map(u => (
+                <div key={u.id} className={`mn-unit-detail ${u.available ? 'avail' : 'full'}`}>
+                  <div className={`mn-dot ${u.available ? 'available' : 'full'}`} />
+                  <span className="mn-site-name">{u.room} #{u.name}</span>
+                  <span className={u.available ? 'mn-tag green' : 'mn-tag muted'}>{u.available ? 'Available' : 'Full'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Avenue-level details (unfiltered monitors) */}
+          {!hasUnitDetails && Object.entries(grouped).map(([operatorName, items]) => (
             <div key={operatorName} className="mn-operator">
               <span className="mn-op-name">{operatorName}</span>
               <div className="mn-sites">
@@ -749,9 +928,6 @@ function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems
               </div>
             </div>
           ))}
-          <div className="mn-details-footer">
-            <button className="mn-action" onClick={onMarkBooked}>Mark booked</button>
-          </div>
         </div>
       )}
     </div>

@@ -70,5 +70,17 @@ export function useFavourites() {
     }));
   }, []);
 
-  return { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, loading, reload: loadFavourites };
+  const toggleNotify = useCallback(async (favId, currentlyOn) => {
+    const headers = await getAuthHeaders();
+    await fetch(`${API}/api/favourites/${favId}/notify`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ notify: !currentlyOn }),
+    });
+    setFavourites((prev) => prev.map(fav =>
+      fav.id !== favId ? fav : { ...fav, notify: !currentlyOn }
+    ));
+  }, []);
+
+  return { favourites, addFavourite, removeFavourite, markBooked, unmarkBooked, toggleNotify, loading, reload: loadFavourites };
 }

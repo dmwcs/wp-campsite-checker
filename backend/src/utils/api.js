@@ -7,6 +7,33 @@ export async function fetchAvailability(date, period) {
   return response.json();
 }
 
+// Unit-level availability
+const UNIT_API_BASE = 'https://webapi.bookeasy.com.au/api/getAccomUnitRates';
+
+export async function fetchUnitAvailability(date, period, unitIds) {
+  const params = new URLSearchParams({
+    q: 114, operators: '33314', date, period, adults: 2, children: 0, infants: 0,
+  });
+  if (unitIds?.length > 0) params.set('units', unitIds.join(','));
+  const response = await fetch(`${UNIT_API_BASE}?${params}`);
+  if (!response.ok) throw new Error(`Unit API error: ${response.status}`);
+  return response.json();
+}
+
+export function parseUnitAvailability(data, filterIds) {
+  const results = [];
+  const items = data?.Data || data || [];
+  for (const op of (Array.isArray(items) ? items : [])) {
+    for (const room of (op.Items || [])) {
+      for (const unit of (room.U || [])) {
+        if (filterIds && !filterIds.includes(unit.Id)) continue;
+        results.push({ unitId: unit.Id, available: unit.A === 1 });
+      }
+    }
+  }
+  return results;
+}
+
 export function parseAvailability(data) {
   const available = [];
   for (const operator of data) {
