@@ -41,12 +41,6 @@ Domain  →  campsite.sheltoncui.com (ACM + CloudFront)
 └── pnpm-workspace.yaml
 ```
 
-## APIs Used
-
-- `bookeasy.com.au/be/getAccomRatesGrid` — Avenue-level availability
-- `bookeasy.com.au/api/getAccomUnitRates` — Site-level availability (specific campsites)
-- `bookeasy.com.au/api/getAccomUnits` — Campsite metadata (names, IDs, coordinates)
-
 ## Deploy
 
 ```bash
