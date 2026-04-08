@@ -1204,67 +1204,82 @@ select option {
   font-size: 14px;
 }
 
+/* ════════════════════════════════════
+   Monitor Cards — Redesigned
+   ════════════════════════════════════ */
+
 .fav-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.fav-item {
+/* ── Card shell ── */
+.mon-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-.fav-item-header {
+/* ── Card header ── */
+.mon-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px;
+  gap: 14px;
+  padding: 18px 20px 14px;
 }
 
-.fav-item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.mon-head-left {
   min-width: 0;
 }
 
-.fav-item-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-bright);
+.mon-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-heading);
+  margin-bottom: 4px;
+  line-height: 1.3;
 }
 
-.fav-item-dates {
+.mon-range {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fav-item-actions {
+.mon-head-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
+  padding-top: 2px;
 }
 
-.fav-item-status {
-  font-size: 12px;
+.mon-pill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  text-transform: uppercase;
 }
 
-.loading-text {
-  color: var(--text-secondary);
+.mon-pill.green {
+  color: var(--green);
+  background: var(--green-dim);
 }
 
-.error-text {
-  color: var(--red);
+.mon-pill.teal {
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 
-.fav-remove-btn {
-  width: 24px;
-  height: 24px;
+.mon-delete {
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1272,132 +1287,288 @@ select option {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 16px;
+  opacity: 0.4;
   transition: all 0.15s ease;
+  margin-left: 2px;
 }
 
-.fav-remove-btn:hover {
+.mon-delete:hover {
+  opacity: 1;
   background: var(--red-dim);
   color: var(--red);
 }
 
-.fav-badge {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  border-radius: 100px;
+/* ── Progress bar ── */
+.mon-progress {
+  display: flex;
+  gap: 3px;
+  padding: 0 20px;
+  margin-bottom: 12px;
 }
 
-.fav-badge.booked {
-  color: var(--accent);
-  background: var(--accent-dim);
+.mon-prog-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.3s ease;
 }
 
-.fav-badge.available {
-  color: var(--green);
-  background: var(--green-dim);
+.mon-prog-seg.available {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
 }
 
-.fav-badge.monitoring {
+.mon-prog-seg.booked {
+  background: var(--accent);
+}
+
+/* ── Full period ── */
+.mon-full-period {
+  padding: 0 12px;
+  margin-bottom: 6px;
+}
+
+.mon-breakdown-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
   color: var(--text-secondary);
-  background: var(--bg-raised);
+  padding: 0 16px;
+  margin-bottom: 4px;
 }
 
-/* ── Per-night cards ── */
-.fav-nights {
-  padding: 0 16px 14px;
+/* ── Night rows ── */
+.mon-nights {
+  padding: 0 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
-.fav-night {
+.mn-row {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: background 0.15s ease;
+}
+
+.mn-row-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  gap: 10px;
+  padding: 9px 12px;
+  user-select: none;
+  min-height: 42px;
+}
+
+.mn-row-head.clickable {
+  cursor: pointer;
+}
+
+.mn-row-head.clickable:hover {
+  background: var(--bg-hover);
+}
+
+.mn-row.available .mn-row-head {
+  background: rgba(74, 222, 128, 0.04);
+}
+
+.mn-row.available.expanded .mn-row-head {
+  background: rgba(74, 222, 128, 0.06);
+}
+
+/* Status dot */
+.mn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mn-dot.full {
+  background: var(--text-secondary);
+  opacity: 0.4;
+}
+
+.mn-dot.available {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+
+.mn-dot.booked {
+  background: var(--accent);
+}
+
+/* Date text */
+.mn-date {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-bright);
+  flex: 1;
+  min-width: 0;
+}
+
+.mn-date.full {
+  color: var(--text-secondary);
+}
+
+.mn-date.booked {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* Right side controls */
+.mn-row-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  min-width: 200px;
+}
+
+.mn-tag {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 50px;
+  text-align: right;
+}
+
+.mn-tag.muted {
+  color: var(--text-secondary);
+}
+
+.mn-tag.green {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.mn-tag.teal {
+  color: var(--accent);
+}
+
+.mn-book {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 9px;
+  background: var(--green);
+  color: var(--bg-deep);
+  border-radius: 4px;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
   transition: all 0.12s ease;
 }
 
-.fav-night.available {
-  background: var(--green-dim);
-  border: 1px solid var(--green-border);
+.mn-book:hover {
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
 }
 
-.fav-night.booked {
-  opacity: 0.5;
+.mn-action {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 8px;
+  background: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all 0.12s ease;
 }
 
-.fav-night-date {
-  font-size: 13px;
+.mn-action:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.mn-chevron {
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.mn-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* ── Expanded details ── */
+.mn-details {
+  padding: 2px 12px 10px 28px;
+  animation: mnExpand 0.15s ease;
+}
+
+@keyframes mnExpand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mn-operator {
+  margin-bottom: 6px;
+}
+
+.mn-op-name {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.mn-sites {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mn-site {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  text-decoration: none;
+  transition: all 0.1s ease;
+}
+
+.mn-site:hover {
+  background: var(--bg-hover);
+}
+
+.mn-site-name {
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-bright);
 }
 
-.fav-night.booked .fav-night-date {
-  text-decoration: line-through;
-  color: var(--text-secondary);
-}
-
-.fav-night-right {
+.mn-site-right {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
 
-.fav-night-status {
+.mn-site-price {
   font-size: 12px;
-  white-space: nowrap;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 
-.fav-night-status.monitoring {
+.mn-site-stock {
+  font-size: 10px;
   color: var(--text-secondary);
 }
 
-.fav-night-status.available {
-  color: var(--green);
-  font-weight: 600;
-}
-
-.fav-night-status.booked {
-  color: var(--accent);
-}
-
-.fav-night-book {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 10px;
-  background: var(--green);
-  color: var(--bg-deep);
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-
-.fav-night-book:hover {
-  box-shadow: 0 0 12px rgba(74, 222, 128, 0.3);
-}
-
-.fav-night-mark {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 4px 10px;
-  background: none;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-
-.fav-night-mark:hover {
-  color: var(--accent);
-  border-color: var(--accent-border);
+.mn-details-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
 }
 
 /* ── Footer ── */

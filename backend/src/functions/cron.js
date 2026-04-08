@@ -1,5 +1,6 @@
-import { getAllActiveFavourites, updateNightStatus, getUserSettings } from '../utils/db.js';
+import { getAllActiveFavourites, updateNightStatus, updateFullPeriodStatus, getUserSettings } from '../utils/db.js';
 import { fetchAvailability, parseAvailability } from '../utils/api.js';
+import { calcNights } from '../utils/shared.js';
 
 export async function handler() {
   console.log('Cron: checking all active favourites...');
@@ -29,35 +30,72 @@ export async function handler() {
     }
   }));
 
-  // Check each favourite's monitoring nights
+  // Query full periods (deduplicated by checkIn+checkOut)
+  const fullPeriodResults = {};
+  const periodKeys = new Set();
   for (const fav of allFavs) {
-    const newlyAvailable = [];
+    const key = `${fav.checkIn}|${fav.checkOut}`;
+    if (!periodKeys.has(key)) {
+      periodKeys.add(key);
+      const nights = calcNights(fav.checkIn, fav.checkOut);
+      if (nights > 1) {
+        try {
+          const data = await fetchAvailability(fav.checkIn, nights);
+          fullPeriodResults[key] = parseAvailability(data);
+        } catch (e) {
+          console.error(`Cron: full period API error for ${key}:`, e.message);
+          fullPeriodResults[key] = null;
+        }
+      }
+    }
+  }
 
+  // Check each favourite
+  for (const fav of allFavs) {
+    const notifications = [];
+
+    // Check per-night
     for (const night of fav.nights) {
       const available = dateResults[night.date];
-      if (available === null) continue; // API error, skip
+      if (available === null) continue;
 
       const hasAvailability = available.length > 0;
       const wasAvailable = night.status === 'available';
       const newStatus = hasAvailability ? 'available' : 'monitoring';
 
-      // Update status
       if (newStatus !== night.status) {
         await updateNightStatus(fav.userId, fav.favId, night.date, newStatus);
       }
 
-      // Newly available → add to notification list
       if (hasAvailability && !wasAvailable) {
-        newlyAvailable.push({ date: night.date, nextDate: night.nextDate, sites: available });
+        notifications.push({ type: 'night', date: night.date, nextDate: night.nextDate, sites: available });
       }
     }
 
-    // Send notification if any nights became available
-    if (newlyAvailable.length > 0) {
+    // Check full period
+    const periodKey = `${fav.checkIn}|${fav.checkOut}`;
+    const fullAvail = fullPeriodResults[periodKey];
+    if (fullAvail !== null && fullAvail !== undefined) {
+      const fullHasAvail = fullAvail.length > 0;
+      const wasFullAvail = fav.fullPeriodStatus === 'available';
+      const newFullStatus = fullHasAvail ? 'available' : 'full';
+
+      if (newFullStatus !== fav.fullPeriodStatus) {
+        await updateFullPeriodStatus(fav.userId, fav.favId, newFullStatus);
+      }
+
+      if (fullHasAvail && !wasFullAvail) {
+        const nights = calcNights(fav.checkIn, fav.checkOut);
+        notifications.push({ type: 'full', checkIn: fav.checkIn, checkOut: fav.checkOut, nights, sites: fullAvail });
+      }
+    }
+
+    // Send notification if anything new
+    if (notifications.length > 0) {
       try {
         const settings = await getUserSettings(fav.userId);
         if (settings?.email) {
-          await sendNightNotification(settings.email, fav.name, newlyAvailable);
+          await sendNotification(settings.email, fav.name, notifications);
           console.log(`Cron: email sent to ${settings.email} for ${fav.name}`);
         }
       } catch (e) {
@@ -69,24 +107,31 @@ export async function handler() {
   return { statusCode: 200, body: 'Done' };
 }
 
-async function sendNightNotification(toEmail, favName, nights) {
+async function sendNotification(toEmail, favName, notifications) {
   const { SESClient, SendEmailCommand } = await import('@aws-sdk/client-ses');
   const ses = new SESClient({});
 
-  const nightDetails = nights.map(n => {
-    const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/晚, 剩${s.numAvailable}个`).join('\n');
-    return `  ${n.date} → ${n.nextDate}\n${siteList}`;
+  const sections = notifications.map(n => {
+    const siteList = n.sites.map(s => `    ${s.name} — $${s.cost}/night, ${s.numAvailable} left`).join('\n');
+    if (n.type === 'full') {
+      return `  FULL PERIOD: ${n.checkIn} → ${n.checkOut} (${n.nights} nights)\n${siteList}`;
+    }
+    return `  ${n.date} → ${n.nextDate} (1 night)\n${siteList}`;
   }).join('\n\n');
 
-  const subject = `🏕️ ${favName} 有空位了！`;
-  const body = `你关注的「${favName}」有新空位：
+  const hasFullPeriod = notifications.some(n => n.type === 'full');
+  const subject = hasFullPeriod
+    ? `🏕️ ${favName} — Full period available!`
+    : `🏕️ ${favName} — Spots available!`;
 
-${nightDetails}
+  const body = `Availability change detected for "${favName}":
 
-立即预订：https://bookings.parks.vic.gov.au/book#
+${sections}
+
+Book now: https://bookings.parks.vic.gov.au/book#
 
 ---
-此邮件由 WP Campsite Checker 自动发送
+Sent by WP Campsite Checker
 `;
 
   await ses.send(new SendEmailCommand({

@@ -16,12 +16,13 @@ provider:
   stage: ${opt:stage, 'dev'}
   environment:
     DYNAMODB_TABLE: ${self:service}-${self:provider.stage}
-    SES_FROM_EMAIL: 'noreply@sheltoncui.com'
+    SES_FROM_EMAIL: 'WP Campsite Checker <wpcampsitechecker@sheltoncui.com>'
     CRON_SECRET: ${env:CRON_SECRET, ''}
   httpApi:
     cors:
       allowedOrigins:
         - https://d27uqj4rfn4tet.cloudfront.net
+        - https://campsite.sheltoncui.com
         - http://localhost:5173
         - http://localhost:5174
         - http://localhost:5175

@@ -122,6 +122,16 @@ export async function updateNightStatus(userId, favId, nightDate, status) {
   }));
 }
 
+// Update full period status (used by cron)
+export async function updateFullPeriodStatus(userId, favId, status) {
+  await db.send(new UpdateCommand({
+    TableName: TABLE,
+    Key: { PK: `USER#${userId}`, SK: `FAV#${favId}` },
+    UpdateExpression: 'SET fullPeriodStatus = :s, fullPeriodChecked = :t',
+    ExpressionAttributeValues: { ':s': status, ':t': new Date().toISOString() },
+  }));
+}
+
 // ── Scan all favourites with monitoring nights (for cron) ──
 
 export async function getAllActiveFavourites() {
@@ -143,6 +153,9 @@ export async function getAllActiveFavourites() {
         userId: item.PK.replace('USER#', ''),
         favId: item.SK.replace('FAV#', ''),
         name: item.name,
+        checkIn: item.checkIn,
+        checkOut: item.checkOut,
+        fullPeriodStatus: item.fullPeriodStatus || null,
         nights: monitoringNights,
       });
     }

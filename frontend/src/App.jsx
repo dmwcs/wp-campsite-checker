@@ -35,6 +35,10 @@ function calcNights(checkIn, checkOut) {
   return diff > 0 ? diff : 0;
 }
 
+// Date limits: today → ~8 months from today
+const TODAY = formatDate(new Date());
+const MAX_DATE = formatDate(addDays(new Date(), 240));
+
 export default function App() {
   const [prefs, updatePrefs] = usePreferences();
   const { user, checking: authChecking, signOut, refresh: refreshAuth } = useAuth();
@@ -44,18 +48,19 @@ export default function App() {
   const [emailEditing, setEmailEditing] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
+  const [tabResults, setTabResults] = useState({}); // { weekend: {...}, holiday: {...}, custom: {...} }
+  const [tabErrors, setTabErrors] = useState({});
   const [helpTab, setHelpTab] = useState(null);
   const [showAddFav, setShowAddFav] = useState(false);
   const [favDate, setFavDate] = useState(formatDate(addDays(new Date(), 1)));
   const [favCheckout, setFavCheckout] = useState(formatDate(addDays(new Date(), 3)));
   const [favName, setFavName] = useState('');
+  const [liveStatus, setLiveStatus] = useState({}); // { [date]: { status, items } }
+  const [liveFullPeriod, setLiveFullPeriod] = useState({}); // { [favId]: { status, items, checking } }
 
   const query = useCallback(async (tab, opts) => {
     setLoading(true);
-    setError(null);
-    setResults(null);
+    setTabErrors((prev) => ({ ...prev, [tab]: null }));
 
     try {
       let data;
@@ -70,9 +75,9 @@ export default function App() {
       } else {
         data = await queryCustom(opts.customDate, opts.customNights);
       }
-      setResults(data);
+      setTabResults((prev) => ({ ...prev, [tab]: data }));
     } catch (e) {
-      setError(e.message);
+      setTabErrors((prev) => ({ ...prev, [tab]: e.message }));
     } finally {
       setLoading(false);
     }
@@ -83,6 +88,68 @@ export default function App() {
     if (settings.email) setEmailInput(settings.email);
   }, [settings.email]);
 
+  // Live check all monitoring nights + full periods
+  const checkFavouritesLive = useCallback(async (favList) => {
+    const datesToCheck = new Set();
+    for (const fav of favList) {
+      for (const n of (fav.nights || [])) {
+        if (n.status !== 'booked') datesToCheck.add(n.date);
+      }
+    }
+    if (datesToCheck.size === 0) return;
+
+    // Mark all as checking
+    const init = {};
+    for (const d of datesToCheck) init[d] = { status: 'checking', items: [] };
+    setLiveStatus(init);
+
+    // Mark full periods as checking
+    const fpInit = {};
+    for (const fav of favList) {
+      const unbooked = (fav.nights || []).filter(n => n.status !== 'booked');
+      if (unbooked.length > 1) fpInit[fav.id] = { status: 'checking', items: [] };
+    }
+    setLiveFullPeriod(fpInit);
+
+    // Query per-night in parallel
+    await Promise.all([...datesToCheck].map(async (date) => {
+      try {
+        const data = await fetchAvailability(date, 1);
+        const avail = parseAvailability(data);
+        setLiveStatus((prev) => ({
+          ...prev,
+          [date]: { status: avail.length > 0 ? 'available' : 'full', items: avail },
+        }));
+      } catch {
+        setLiveStatus((prev) => ({ ...prev, [date]: { status: 'error', items: [] } }));
+      }
+    }));
+
+    // Query full period for each favourite
+    await Promise.all(favList.map(async (fav) => {
+      const unbooked = (fav.nights || []).filter(n => n.status !== 'booked');
+      if (unbooked.length <= 1) return;
+      try {
+        const nights = calcNights(fav.checkIn, fav.checkOut);
+        const data = await fetchAvailability(fav.checkIn, nights);
+        const avail = parseAvailability(data);
+        setLiveFullPeriod((prev) => ({
+          ...prev,
+          [fav.id]: { status: avail.length > 0 ? 'available' : 'full', items: avail },
+        }));
+      } catch {
+        setLiveFullPeriod((prev) => ({ ...prev, [fav.id]: { status: 'error', items: [] } }));
+      }
+    }));
+  }, []);
+
+  // Auto-check when favourites load
+  useEffect(() => {
+    if (prefs.tab === 'favourites' && user && favourites.length > 0 && !favsLoading) {
+      checkFavouritesLive(favourites);
+    }
+  }, [prefs.tab, user, favourites, favsLoading, checkFavouritesLive]);
+
   // Auto-query on mount
   useEffect(() => {
     if (prefs.tab === 'favourites') return; // favourites load from API automatically
@@ -92,11 +159,10 @@ export default function App() {
 
   const handleTabChange = (tab) => {
     updatePrefs({ tab });
-    setResults(null);
-    setError(null);
-    if (tab === 'weekend') {
+    // Weekend/holiday auto-query only if no cached results
+    if (tab === 'weekend' && !tabResults.weekend) {
       query(tab, { ...prefs, tab });
-    } else if (tab === 'holiday' && prefs.holidayIndex >= 0) {
+    } else if (tab === 'holiday' && prefs.holidayIndex >= 0 && !tabResults.holiday) {
       query(tab, { ...prefs, tab });
     }
   };
@@ -219,10 +285,11 @@ export default function App() {
                 <input
                   type="date"
                   value={prefs.customDate}
+                  min={TODAY}
+                  max={MAX_DATE}
                   onChange={(e) => {
                     const newDate = e.target.value;
                     const updates = { customDate: newDate };
-                    // Auto-adjust check-out if it's before the new check-in
                     if (prefs.customCheckout <= newDate) {
                       updates.customCheckout = formatDate(addDays(new Date(newDate + 'T00:00:00'), 1));
                     }
@@ -236,7 +303,7 @@ export default function App() {
                   type="date"
                   value={prefs.customCheckout}
                   min={prefs.customDate ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 1)) : undefined}
-                  max={prefs.customDate ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 14)) : undefined}
+                  max={prefs.customDate ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 14)) < MAX_DATE ? formatDate(addDays(new Date(prefs.customDate + 'T00:00:00'), 14)) : MAX_DATE : MAX_DATE}
                   onChange={(e) => updatePrefs({ customCheckout: e.target.value })}
                 />
               </div>
@@ -334,6 +401,8 @@ export default function App() {
                     <input
                       type="date"
                       value={favDate}
+                      min={TODAY}
+                      max={MAX_DATE}
                       onChange={(e) => {
                         setFavDate(e.target.value);
                         if (favCheckout <= e.target.value) {
@@ -348,7 +417,7 @@ export default function App() {
                       type="date"
                       value={favCheckout}
                       min={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 1)) : undefined}
-                      max={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) : undefined}
+                      max={favDate ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) < MAX_DATE ? formatDate(addDays(new Date(favDate + 'T00:00:00'), 14)) : MAX_DATE : MAX_DATE}
                       onChange={(e) => setFavCheckout(e.target.value)}
                     />
                   </div>
@@ -375,65 +444,89 @@ export default function App() {
                 const endDate = new Date(fav.checkOut + 'T00:00:00');
                 const totalNights = fav.nights?.length || 0;
                 const bookedCount = fav.nights?.filter(n => n.status === 'booked').length || 0;
-                const availCount = fav.nights?.filter(n => n.status === 'available').length || 0;
-                const monitorCount = totalNights - bookedCount;
+                const liveAvailCount = (fav.nights || []).filter(n => n.status !== 'booked' && liveStatus[n.date]?.status === 'available').length;
 
                 return (
-                  <div key={fav.id} className="fav-item">
-                    <div className="fav-item-header">
-                      <div className="fav-item-info">
-                        <span className="fav-item-name">{fav.name}</span>
-                        <span className="fav-item-dates">
-                          {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {totalNights} nights
-                        </span>
+                  <div key={fav.id} className="mon-card">
+                    {/* Card header */}
+                    <div className="mon-head">
+                      <div className="mon-head-left">
+                        <h3 className="mon-title">{fav.name}</h3>
+                        <span className="mon-range">{formatDisplayDate(startDate)} → {formatDisplayDate(endDate)} · {totalNights} nights</span>
                       </div>
-                      <div className="fav-item-actions">
-                        {bookedCount > 0 && (
-                          <span className="fav-badge booked">{bookedCount} Booked</span>
-                        )}
-                        {availCount > 0 && (
-                          <span className="fav-badge available">{availCount} Available</span>
-                        )}
-                        {monitorCount > 0 && bookedCount < totalNights && (
-                          <span className="fav-badge monitoring">{monitorCount - availCount} Monitoring</span>
-                        )}
-                        <button className="fav-remove-btn" onClick={() => handleRemoveFav(fav.id, fav.name)} title="Remove">×</button>
+                      <div className="mon-head-right">
+                        {liveAvailCount > 0 && <span className="mon-pill green">{liveAvailCount} available</span>}
+                        {bookedCount > 0 && <span className="mon-pill teal">{bookedCount} booked</span>}
+                        <button className="mon-delete" onClick={() => handleRemoveFav(fav.id, fav.name)} aria-label="Remove">
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11 3L3 11M3 3l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                        </button>
                       </div>
                     </div>
 
-                    {/* Per-night cards */}
-                    <div className="fav-nights">
+                    {/* Progress bar */}
+                    <div className="mon-progress">
+                      {(fav.nights || []).map((night) => {
+                        const live = liveStatus[night.date];
+                        const s = night.status === 'booked' ? 'booked' : live?.status === 'available' ? 'available' : 'full';
+                        return <div key={night.date} className={`mon-prog-seg ${s}`} />;
+                      })}
+                    </div>
+
+                    {/* Full period status */}
+                    {liveFullPeriod[fav.id] && totalNights > 1 && (() => {
+                      const fp = liveFullPeriod[fav.id];
+                      const fpItems = fp.items || [];
+                      const fpOption = fp.status === 'available' ? {
+                        title: `Full period ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}`,
+                        nights: `${totalNights} nights`,
+                        items: fpItems,
+                      } : null;
+                      return (
+                        <div className="mon-full-period">
+                          {fp.status === 'checking' && (
+                            <div className="mn-row"><div className="mn-row-head"><span className="mn-tag muted">Checking full period...</span></div></div>
+                          )}
+                          {fp.status === 'available' && fpOption && (
+                            <OptionCard option={fpOption} />
+                          )}
+                          {fp.status === 'full' && (
+                            <div className="mn-row"><div className="mn-row-head">
+                              <div className="mn-dot full" />
+                              <span className="mn-date full">Full period {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)}</span>
+                              <div className="mn-row-right"><span className="mn-tag muted">{totalNights} nights · Full</span></div>
+                            </div></div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {totalNights > 1 && <div className="mon-breakdown-label">Nightly breakdown</div>}
+
+                    {/* Night rows */}
+                    <div className="mon-nights">
                       {(fav.nights || []).map((night) => {
                         const d = new Date(night.date + 'T00:00:00');
                         const nd = new Date(night.nextDate + 'T00:00:00');
-                        return (
-                          <div key={night.date} className={`fav-night ${night.status}`}>
-                            <div className="fav-night-date">
-                              {formatDisplayDate(d)} → {formatDisplayDate(nd)}
-                            </div>
-                            <div className="fav-night-right">
-                              {night.status === 'monitoring' && (
-                                <>
-                                  <span className="fav-night-status monitoring">⏳ Monitoring</span>
-                                  <button className="fav-night-mark" onClick={() => markBooked(fav.id, night.date)}>Mark Booked</button>
-                                </>
-                              )}
-                              {night.status === 'available' && (
-                                <>
-                                  <span className="fav-night-status available">🔔 Available</span>
-                                  <a className="fav-night-book" href="https://bookings.parks.vic.gov.au/book#" target="_blank" rel="noopener noreferrer">Book Now</a>
-                                  <button className="fav-night-mark" onClick={() => markBooked(fav.id, night.date)}>Mark Booked</button>
-                                </>
-                              )}
-                              {night.status === 'booked' && (
-                                <>
-                                  <span className="fav-night-status booked">✅ Booked</span>
-                                  <button className="fav-night-mark" onClick={() => unmarkBooked(fav.id, night.date)}>Unmark</button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        );
+                        const live = liveStatus[night.date];
+                        const effectiveStatus = night.status === 'booked' ? 'booked'
+                          : live?.status === 'available' ? 'available'
+                          : live?.status === 'full' ? 'full'
+                          : night.status === 'monitoring' ? 'full' : night.status;
+                        const isChecking = live?.status === 'checking' && night.status !== 'booked';
+                        const siteItems = live?.items || [];
+                        const totalSpots = siteItems.reduce((s, i) => s + (typeof i.numAvailable === 'number' ? i.numAvailable : 0), 0);
+
+                        return <FavNightRow
+                          key={night.date}
+                          date={d}
+                          nextDate={nd}
+                          status={effectiveStatus}
+                          isChecking={isChecking}
+                          totalSpots={totalSpots}
+                          siteItems={siteItems}
+                          onMarkBooked={() => markBooked(fav.id, night.date)}
+                          onUnmark={() => unmarkBooked(fav.id, night.date)}
+                        />;
                       })}
                     </div>
                   </div>
@@ -447,8 +540,9 @@ export default function App() {
       </div>
 
       {/* Results (non-favourites) */}
+      {prefs.tab !== 'favourites' && (
       <div className="results">
-        {loading && prefs.tab !== 'favourites' && (
+        {loading && (
           <div className="loading">
             <div className="loading-dots">
               <span /><span /><span />
@@ -457,18 +551,19 @@ export default function App() {
           </div>
         )}
 
-        {error && prefs.tab !== 'favourites' && (
+        {tabErrors[prefs.tab] && (
           <div className="error-card">
             <span className="error-icon">!</span>
             <div>
               <strong>Query failed</strong>
-              <p>{error}</p>
+              <p>{tabErrors[prefs.tab]}</p>
             </div>
           </div>
         )}
 
-        {results && !loading && prefs.tab !== 'favourites' && <ResultsView results={results} />}
+        {tabResults[prefs.tab] && !loading && <ResultsView results={tabResults[prefs.tab]} />}
       </div>
+      )}
 
       <footer className="footer">
         <span>Made by Shelton</span>
@@ -585,6 +680,81 @@ function ResultsView({ results }) {
         ))}
       </div>
     </>
+  );
+}
+
+function FavNightRow({ date, nextDate, status, isChecking, totalSpots, siteItems, onMarkBooked, onUnmark }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = status === 'available' && siteItems.length > 0;
+
+  // Group sites by operator
+  const grouped = {};
+  for (const item of siteItems) {
+    if (!grouped[item.operator]) grouped[item.operator] = [];
+    grouped[item.operator].push(item);
+  }
+
+  return (
+    <div className={`mn-row ${status} ${expanded ? 'expanded' : ''}`}>
+      <div
+        className={`mn-row-head ${hasDetails ? 'clickable' : ''}`}
+        onClick={() => hasDetails && setExpanded(!expanded)}
+      >
+        <div className={`mn-dot ${status}`} />
+        <span className={`mn-date ${status}`}>
+          {formatDisplayDate(date)} → {formatDisplayDate(nextDate)}
+        </span>
+        <div className="mn-row-right">
+          {isChecking && <span className="mn-tag muted">Checking...</span>}
+
+          {!isChecking && status === 'full' && (
+            <>
+              <span className="mn-tag muted">Full</span>
+              <button className="mn-action" onClick={(e) => { e.stopPropagation(); onMarkBooked(); }}>Mark booked</button>
+            </>
+          )}
+
+          {!isChecking && status === 'available' && (
+            <>
+              <span className="mn-tag green">{totalSpots} spots</span>
+              <a className="mn-book" href={BOOKING_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>Book</a>
+              <svg className={`mn-chevron ${expanded ? 'open' : ''}`} width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </>
+          )}
+
+          {!isChecking && status === 'booked' && (
+            <>
+              <span className="mn-tag teal">Booked</span>
+              <button className="mn-action" onClick={(e) => { e.stopPropagation(); onUnmark(); }}>Undo</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {expanded && hasDetails && (
+        <div className="mn-details">
+          {Object.entries(grouped).map(([operatorName, items]) => (
+            <div key={operatorName} className="mn-operator">
+              <span className="mn-op-name">{operatorName}</span>
+              <div className="mn-sites">
+                {items.map((item, j) => (
+                  <a key={j} className="mn-site" href={BOOKING_URL} target="_blank" rel="noopener noreferrer">
+                    <span className="mn-site-name">{item.name}</span>
+                    <span className="mn-site-right">
+                      <span className="mn-site-price">${item.cost}</span>
+                      <span className="mn-site-stock">{typeof item.numAvailable === 'number' ? item.numAvailable : '?'} left</span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="mn-details-footer">
+            <button className="mn-action" onClick={onMarkBooked}>Mark booked</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

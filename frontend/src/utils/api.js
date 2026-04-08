@@ -12,7 +12,7 @@ export async function fetchAvailability(date, period) {
     period,
   });
 
-  const response = await fetch(`${API_BASE}?${params}`);
+  const response = await fetch(`${API_BASE}?${params}`, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status}`);
   }

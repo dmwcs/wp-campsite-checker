@@ -1,7 +1,10 @@
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 
 export function formatDate(date) {
-  return date.toISOString().split('T')[0];
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 export function formatDisplayDate(date) {
