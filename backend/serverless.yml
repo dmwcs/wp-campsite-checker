@@ -181,6 +181,10 @@ resources:
           - email
         UsernameAttributes:
           - email
+        EmailConfiguration:
+          EmailSendingAccount: DEVELOPER
+          From: 'WP Campsite Checker <wpcampsitechecker@sheltoncui.com>'
+          SourceArn: !Sub 'arn:aws:ses:ap-southeast-2:${AWS::AccountId}:identity/sheltoncui.com'
         Policies:
           PasswordPolicy:
             MinimumLength: 8
