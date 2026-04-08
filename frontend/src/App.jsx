@@ -559,8 +559,18 @@ export default function App() {
                     {/* Progress bar */}
                     <div className="mon-progress">
                       {(fav.nights || []).map((night) => {
-                        const live = liveStatus[night.date];
-                        const s = night.status === 'booked' ? 'booked' : live?.status === 'available' ? 'available' : 'full';
+                        const hasFilter = fav.filter && fav.filter.length > 0;
+                        let s;
+                        if (night.status === 'booked') {
+                          s = 'booked';
+                        } else if (hasFilter) {
+                          const unitKey = `${fav.id}_${night.date}`;
+                          const unitResults = liveUnits[unitKey];
+                          s = unitResults === null ? 'full' : unitResults && unitResults.some(u => u.available) ? 'available' : 'full';
+                        } else {
+                          const live = liveStatus[night.date];
+                          s = live?.status === 'available' ? 'available' : 'full';
+                        }
                         return <div key={night.date} className={`mon-prog-seg ${s}`} />;
                       })}
                     </div>
