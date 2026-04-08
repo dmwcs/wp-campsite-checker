@@ -1,6 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { formatDate, addDays, calcNights } from './shared.js';
+import { fetchAvailability, parseAvailability, fetchUnitAvailability, parseUnitAvailability } from './api.js';
 
 const client = new DynamoDBClient({});
 const db = DynamoDBDocumentClient.from(client);
@@ -48,16 +49,30 @@ export async function putFavourite(userId, fav) {
   const numNights = calcNights(fav.checkIn, fav.checkOut);
   const start = new Date(fav.checkIn + 'T00:00:00');
 
-  // Auto-split into per-night entries
+  // Auto-split into per-night entries, check current availability
+  const hasFilter = fav.filter && fav.filter.length > 0;
   const nights = [];
   for (let i = 0; i < numNights; i++) {
     const date = formatDate(addDays(start, i));
     const nextDate = formatDate(addDays(start, i + 1));
+    let status = 'monitoring';
+    try {
+      if (hasFilter) {
+        const unitIds = fav.filter.map(f => f.id);
+        const data = await fetchUnitAvailability(date, 1, unitIds);
+        const units = parseUnitAvailability(data, unitIds);
+        if (units.some(u => u.available)) status = 'available';
+      } else {
+        const data = await fetchAvailability(date, 1);
+        const available = parseAvailability(data);
+        if (available.length > 0) status = 'available';
+      }
+    } catch {}
     nights.push({
       date,
       nextDate,
-      status: 'monitoring',  // monitoring | available | booked
-      lastChecked: null,
+      status,
+      lastChecked: new Date().toISOString(),
     });
   }
 
